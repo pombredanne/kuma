@@ -1,62 +1,34 @@
-import subprocess
-import zlib
-
-from django.conf import settings
-
-from sumo_locales import LOCALES
+from urlobject import URLObject
 
 
-crc32 = lambda x: zlib.crc32(x.encode('utf-8')) & 0xffffffff
+class QueryURLObject(URLObject):
 
+    def pop_query_param(self, name, value):
+        """
+        Removes the parameter with the given name and value -- if it exists.
+        """
+        params = {}
+        for param, defaults in self.query.multi_dict.items():
+            if param == name:
+                for default in defaults:
+                    if default != value:
+                        params.setdefault(param, []).append(default)
+            else:
+                params[param] = defaults
+        return self.del_query_param(name).set_query_params(params)
 
-call = lambda x: subprocess.Popen(x, stdout=subprocess.PIPE).communicate()
-
-
-def reindex(rotate=False):
-    """Reindex sphinx.
-
-    Note this is only to be used in dev and test environments.
-
-    """
-    calls = [settings.SPHINX_INDEXER, '--all', '--config',
-             settings.SPHINX_CONFIG_PATH]
-    if rotate:
-        calls.append('--rotate')
-
-    call(calls)
-
-
-def start_sphinx():
-    """Start sphinx.
-
-    Note this is only to be used in dev and test environments.
-
-    """
-    call([settings.SPHINX_SEARCHD, '--config',
-        settings.SPHINX_CONFIG_PATH])
-
-
-def stop_sphinx():
-    """Stop sphinx.
-
-    Note this is only to be used in dev and test environments.
-
-    """
-    call([settings.SPHINX_SEARCHD, '--stop', '--config',
-        settings.SPHINX_CONFIG_PATH])
-
-
-def locale_or_default(locale):
-    """Return `locale` or, if `locale` isn't a known locale, a default.
-
-    Default is taken from Django's LANGUAGE_CODE setting.
-
-    """
-    if locale not in LOCALES:
-        locale = settings.LANGUAGE_CODE
-    return locale
-
-
-def sphinx_locale(locale):
-    """Given a locale string like 'en-US', return a Sphinx-ready locale."""
-    return crc32(locale)
+    def merge_query_param(self, name, value):
+        """
+        Adds a query parameter with the given name and value -- but prevents
+        duplication.
+        """
+        params = self.query.multi_dict
+        if name in params:
+            for param, defaults in params.items():
+                if param == name:
+                    if value not in defaults:
+                        defaults.append(value)
+                params[param] = defaults
+        else:
+            params[name] = value
+        return self.set_query_params(params)

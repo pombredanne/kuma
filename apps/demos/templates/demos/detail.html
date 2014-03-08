@@ -2,19 +2,23 @@
 
 {% set full_url = request.build_absolute_uri(submission.get_absolute_url()) %}
 {% set short_url = full_url | bitly_shorten %}
+{% set screenshot = request.build_absolute_uri(submission.screenshot_url(1)) %}
 
-{% block pageid %}demostudio{% endblock %}
+{% block body_attributes %}id="demostudio"{% endblock %}
 {% block bodyclass %}section-demos detail{% endblock %}
 {% block title %}{{ page_title(_('{subtitle} | Demo Studio') | f(subtitle=submission.title)) }}{% endblock %}
 
 {% block extrahead %}
     <meta property="og:title" content="{{ submission.title }}"/>
-    <meta property="og:type" content="website"/>
-    <meta property="og:image" content="{{ request.build_absolute_uri(submission.screenshot_url(1)) }}"/>    
+    <meta property="og:image" content="{{ screenshot }}"/>    
     <meta property="og:site_name" content="{{ page_title(_('Demo Studio')) }}"/>
     <meta property="og:description" content="{{ submission.summary }}"/>
-
     <meta name="description" content="{{ submission.summary }}" />
+
+    <meta name="twitter:title" content="{{ submission.title }}" />
+    <meta name="twitter:image" content="{{ screenshot }}" />
+    <meta name="twitter:url" content="{{ full_url }}" />
+    <meta name="twitter:description" content="{{ submission.summary }}" />
 {% endblock %}
 
 {% block content %}
@@ -287,9 +291,9 @@
       <div id="demo-report">
         <h3>{{ _("Report a Problem") }}</h3>
         <ul>
-            <li><a class="modal" href="{{ url('demos_flag', slug=submission.slug) }}?flag_type=notworking">{{_('Demo is not working')}}</a></li>
-            <li><a class="modal" href="{{ url('demos_flag', slug=submission.slug) }}?flag_type=inappropriate">{{_('Demo is inappropriate')}}</a></li>
-            <li><a class="modal" href="{{ url('demos_flag', slug=submission.slug) }}?flag_type=plagarised">{{_('Demo is not by this author')}}</a></li>
+            <li><a class="modal" href="{{ url('demos_flag', slug=submission.slug) }}?flag_type=notworking" title="{{_('Flag Content')}}">{{_('Demo is not working')}}</a></li>
+            <li><a class="modal" href="{{ url('demos_flag', slug=submission.slug) }}?flag_type=inappropriate" title="{{_('Flag Content')}}">{{_('Demo is inappropriate')}}</a></li>
+            <li><a class="modal" href="{{ url('demos_flag', slug=submission.slug) }}?flag_type=plagarised" title="{{_('Flag Content')}}">{{_('Demo is not by this author')}}</a></li>
         </ul>
       </div>
       
@@ -369,7 +373,7 @@
 
       });
     </script>
-       <script type="text/javascript" src="{{MEDIA_URL}}js/mdn/carousel.js"></script>
+       <script type="text/javascript" src="{{MEDIA_URL}}js/libs/carousel.js"></script>
 
         <script type="text/javascript">
         $(".screenshots").ready(function(){

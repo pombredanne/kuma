@@ -1,13 +1,8 @@
 import datetime
 import logging
 import time
-from os.path import dirname
-
-import requests
 
 import mock
-from mock import patch
-from nose import SkipTest
 from nose.tools import eq_, ok_
 from nose.plugins.attrib import attr
 from pyquery import PyQuery as pq
@@ -16,29 +11,25 @@ from devmo.tests import create_profile
 
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.contrib.sites.models import Site
+from django.core import mail
 from django.core.paginator import PageNotAnInteger
 
 from soapbox.models import Message
 
-from dekicompat.tests import (mock_mindtouch_login,
-                              mock_get_deki_user,
-                              mock_put_mindtouch_user)
-from dekicompat.backends import DekiUserBackend, MINDTOUCH_USER_XML
-from devmo.models import UserProfile, UserDocsActivityFeed
+from devmo.tests import mock_lookup_user
+from devmo.models import UserProfile
 
 from devmo.cron import devmo_calendar_reload
-from devmo.tests import mock_fetch_user_feed
+from devmo.tests import LocalizingClient
 
-from sumo.tests import TestCase, LocalizingClient
+from sumo.tests import TestCase
 from sumo.urlresolvers import reverse
+
+from users.models import UserBan
 
 from waffle.models import Flag
 
 TESTUSER_PASSWORD = 'testpass'
-APP_DIR = dirname(dirname(__file__))
-USER_DOCS_ACTIVITY_FEED_XML = ('%s/fixtures/user_docs_activity_feed.xml' %
-                               APP_DIR)
 
 
 class ProfileViewsTest(TestCase):
@@ -53,26 +44,17 @@ class ProfileViewsTest(TestCase):
     def tearDown(self):
         settings.DEBUG = self.old_debug
 
-    @attr('docs_activity')
-    @attr('bug715923')
-    @patch('devmo.models.UserDocsActivityFeed.fetch_user_feed')
-    def test_bug715923_feed_parsing_errors(self, fetch_user_feed):
-        fetch_user_feed.return_value = """
-            THIS IS NOT EVEN XML, SO BROKEN
-        """
-        try:
-            profile = UserProfile.objects.get(user__username='testuser')
-            user = profile.user
-            url = reverse('devmo.views.profile_view',
-                          args=(user.username,))
-            r = self.client.get(url, follow=True)
-            pq(r.content)
-        except Exception, e:
-            raise e
-            ok_(False, "There should be no exception %s" % e)
+    def _get_current_form_field_values(self, doc):
+        # Scrape out the existing significant form field values.
+        form = dict()
+        for fn in ('email', 'fullname', 'title', 'organization', 'location',
+                   'irc_nickname', 'bio', 'interests', 'country', 'format'):
+            form[fn] = doc.find('#profile-edit *[name="%s"]' % fn).val()
+        form['country'] = 'us'
+        form['format'] = 'html'
+        return form
 
     @attr('docs_activity')
-    @mock_fetch_user_feed
     def test_profile_view(self):
         """A user profile can be viewed"""
         profile = UserProfile.objects.get(user__username='testuser')
@@ -97,32 +79,6 @@ class ProfileViewsTest(TestCase):
         eq_(profile.bio,
             doc.find('#profile-head.vcard .bio').text())
 
-        if not settings.DEKIWIKI_ENDPOINT:
-            # The rest of this test relies on MindTouch API data.
-            # TODO: Properly rewrite to use Kuma data
-            return
-
-        # There should be 15 doc activity items in the page.
-        feed_trs = doc.find('#docs-activity table.activity tbody tr')
-        eq_(15, feed_trs.length)
-
-        # Check to find all the items expected from the feed
-        feed = UserDocsActivityFeed(username="Sheppy")
-        for idx in range(0, 15):
-            item = feed.items[idx]
-            item_el = feed_trs.eq(idx)
-            eq_(item.current_title, item_el.find('h3').text())
-            eq_(item.view_url, item_el.find('h3 a').attr('href'))
-            if item.edit_url:
-                eq_(item.edit_url,
-                    item_el.find('.actions a.edit').attr('href'))
-            if item.diff_url:
-                eq_(item.diff_url,
-                    item_el.find('.actions a.diff').attr('href'))
-            if item.history_url:
-                eq_(item.history_url,
-                    item_el.find('.actions a.history').attr('href'))
-
     def test_my_profile_view(self):
         u = User.objects.get(username='testuser')
         self.client.login(username=u.username, password=TESTUSER_PASSWORD)
@@ -131,11 +87,9 @@ class ProfileViewsTest(TestCase):
         ok_(reverse('devmo.views.profile_view', args=(u.username,)) in
             resp['Location'])
 
-    @mock_put_mindtouch_user
-    @mock_fetch_user_feed
     def test_bug_698971(self):
         """A non-numeric page number should not cause an error"""
-        (user, deki_user, profile) = create_profile()
+        (user, profile) = create_profile()
 
         url = '%s?page=asdf' % reverse('devmo.views.profile_view',
                                        args=(user.username,))
@@ -145,9 +99,16 @@ class ProfileViewsTest(TestCase):
         except PageNotAnInteger:
             ok_(False, "Non-numeric page number should not cause an error")
 
-    @mock_put_mindtouch_user
-    @mock_fetch_user_feed
-    def test_profile_edit(self):
+    @mock.patch('basket.lookup_user')
+    @mock.patch('basket.subscribe')
+    @mock.patch('basket.unsubscribe')
+    def test_profile_edit(self,
+                            unsubscribe,
+                            subscribe,
+                            lookup_user):
+        lookup_user.return_value = mock_lookup_user()
+        subscribe.return_value = True
+        unsubscribe.return_value = True
         profile = UserProfile.objects.get(user__username='testuser')
         user = profile.user
         url = reverse('devmo.views.profile_view', args=(user.username,))
@@ -182,10 +143,12 @@ class ProfileViewsTest(TestCase):
             doc.find('#profile-edit input[name="irc_nickname"]').val())
 
         new_attrs = dict(
-            email="tester23@example.com",
+            email='testuser@test.com',
             fullname="Another Name",
             title="Another title",
             organization="Another org",
+            country="us",
+            format="html"
         )
 
         r = self.client.post(url, new_attrs, follow=True)
@@ -212,9 +175,48 @@ class ProfileViewsTest(TestCase):
         ok_(reverse('devmo.views.profile_edit', args=(u.username,)) in
             resp['Location'])
 
-    @mock_put_mindtouch_user
-    @mock_fetch_user_feed
-    def test_profile_edit_websites(self):
+    @mock.patch('basket.lookup_user')
+    @mock.patch('basket.subscribe')
+    @mock.patch('basket.unsubscribe')
+    def test_profile_edit_beta(self,
+                                unsubscribe,
+                                subscribe,
+                                lookup_user):
+        lookup_user.return_value = mock_lookup_user()
+        subscribe.return_value = True
+        unsubscribe.return_value = True
+        user = User.objects.get(username='testuser')
+        self.client.login(username=user.username,
+                          password=TESTUSER_PASSWORD)
+
+        url = reverse('devmo.views.profile_edit',
+                      args=(user.username,))
+        r = self.client.get(url, follow=True)
+        doc = pq(r.content)
+        eq_(None, doc.find('input#id_beta').attr('checked'))
+
+        form = self._get_current_form_field_values(doc)
+        form['beta'] = True
+
+        r = self.client.post(url, form, follow=True)
+
+        url = reverse('devmo.views.profile_edit',
+                      args=(user.username,))
+        r = self.client.get(url, follow=True)
+        doc = pq(r.content)
+        eq_('checked', doc.find('input#id_beta').attr('checked'))
+
+    @mock.patch('basket.lookup_user')
+    @mock.patch('basket.subscribe')
+    @mock.patch('basket.unsubscribe')
+    def test_profile_edit_websites(self,
+                                    unsubscribe,
+                                    subscribe,
+                                    lookup_user):
+        lookup_user.return_value = mock_lookup_user()
+        subscribe.return_value = True
+        unsubscribe.return_value = True
+
         user = User.objects.get(username='testuser')
         self.client.login(username=user.username,
                 password=TESTUSER_PASSWORD)
@@ -229,14 +231,12 @@ class ProfileViewsTest(TestCase):
             u'twitter': u'http://twitter.com/lmorchard',
             u'github': u'http://github.com/lmorchard',
             u'stackoverflow': u'http://stackoverflow.com/users/lmorchard',
+            u'linkedin': u'https://www.linkedin.com/in/testuser',
+            u'mozillians': u'https://mozillians.org/u/testuser',
+            u'facebook': u'https://www.facebook.com/test.user'
         }
 
-        # Scrape out the existing significant form field values.
-        form = dict()
-        for fn in ('email', 'fullname', 'title', 'organization', 'location',
-                   'irc_nickname', 'bio', 'interests'):
-            form[fn] = doc.find('#profile-edit *[name="%s"]' % fn).val()
-        form['email'] = 'test@example.com'
+        form = self._get_current_form_field_values(doc)
 
         # Fill out the form with websites.
         form.update(dict(('websites_%s' % k, v)
@@ -277,9 +277,17 @@ class ProfileViewsTest(TestCase):
         for n in ('website', 'twitter', 'stackoverflow'):
             eq_(1, doc.find(tmpl % n).length)
 
-    @mock_put_mindtouch_user
-    @mock_fetch_user_feed
-    def test_profile_edit_interests(self):
+    @mock.patch('basket.lookup_user')
+    @mock.patch('basket.subscribe')
+    @mock.patch('basket.unsubscribe')
+    def test_profile_edit_interests(self,
+                                    unsubscribe,
+                                    subscribe,
+                                    lookup_user):
+        lookup_user.return_value = mock_lookup_user()
+        subscribe.return_value = True
+        unsubscribe.return_value = True
+
         user = User.objects.get(username='testuser')
         self.client.login(username=user.username,
                 password=TESTUSER_PASSWORD)
@@ -291,11 +299,7 @@ class ProfileViewsTest(TestCase):
 
         test_tags = ['javascript', 'css', 'canvas', 'html', 'homebrewing']
 
-        form = dict()
-        for fn in ('email', 'fullname', 'title', 'organization', 'location',
-                'irc_nickname', 'bio', 'interests'):
-            form[fn] = doc.find('#profile-edit *[name="%s"]' % fn).val()
-        form['email'] = 'test@example.com'
+        form = self._get_current_form_field_values(doc)
 
         form['interests'] = ', '.join(test_tags)
 
@@ -334,9 +338,13 @@ class ProfileViewsTest(TestCase):
 
         eq_(1, doc.find('.error #id_expertise').length)
 
-    @mock_put_mindtouch_user
-    @mock_fetch_user_feed
-    def test_bug_709938_interests(self):
+    @mock.patch('basket.lookup_user')
+    @mock.patch('basket.subscribe')
+    @mock.patch('basket.unsubscribe')
+    def test_bug_709938_interests(self, unsubscribe, subscribe, lookup_user):
+        lookup_user.return_value = mock_lookup_user()
+        subscribe.return_value = True
+        unsubscribe.return_value = True
         user = User.objects.get(username='testuser')
         self.client.login(username=user.username,
                 password=TESTUSER_PASSWORD)
@@ -353,11 +361,7 @@ class ProfileViewsTest(TestCase):
                      u'spirituality,Art,Philosophy,Psychology,Business,Music,'
                      u'Computer Science']
 
-        form = dict()
-        for fn in ('email', 'fullname', 'title', 'organization', 'location',
-                'irc_nickname', 'bio', 'interests'):
-            form[fn] = doc.find('#profile-edit *[name="%s"]' % fn).val()
-        form['email'] = 'test@example.com'
+        form = self._get_current_form_field_values(doc)
 
         form['interests'] = test_tags
 
@@ -368,91 +372,15 @@ class ProfileViewsTest(TestCase):
         assert ('Ensure this value has at most 255 characters'
                 in doc.find('ul.errorlist li').text())
 
-    @mock_mindtouch_login
-    @mock_get_deki_user
-    @mock_put_mindtouch_user
-    @mock_fetch_user_feed
-    @mock.patch_object(Site.objects, 'get_current')
-    def test_profile_edit_language_saves_to_mindtouch(self, get_current):
-        if not settings.DEKIWIKI_ENDPOINT:
-            # Don't even bother with this test, if there's no MindTouch API
-            raise SkipTest()
 
-        get_current.return_value.domain = 'dev.mo.org'
-
-        try:
-            user = User.objects.get(username='testaccount')
-            user.delete()
-        except User.DoesNotExist:
-            pass
-
-        if not getattr(settings, 'DEKIWIKI_MOCK', False):
-            # HACK: Ensure that expected user details are in MindTouch when not
-            # mocking the API
-            mt_email = 'testaccount@testaccount.com'
-            user_xml = MINDTOUCH_USER_XML % dict(username="testaccount",
-                    email=mt_email, fullname="None", status="active",
-                    language="", timezone="-08:00", role="Contributor")
-            DekiUserBackend.put_mindtouch_user(deki_user_id='=testaccount',
-                                               user_xml=user_xml)
-            passwd_url = '%s/@api/deki/users/%s/password?apikey=%s' % (
-                settings.DEKIWIKI_ENDPOINT, '=testaccount',
-                settings.DEKIWIKI_APIKEY)
-            requests.put(passwd_url, data='theplanet')
-
-        # log in as a MindTouch user to create django user & profile
-        response = self.client.post(reverse('users.login', locale='en-US'),
-                                    {'username': 'testaccount',
-                                     'password': 'theplanet'}, follow=True)
-        eq_(200, response.status_code)
-        user = User.objects.get(username='testaccount')
-        profile = UserProfile.objects.get(user=user)
-        ok_(profile)
-
-        # use profile edit to change language
-        url = reverse('devmo.views.profile_edit',
-                      args=(user.username,))
-        r = self.client.get(url, follow=True)
-        eq_(200, r.status_code, 'Profile should be found.')
-        doc = pq(r.content)
-
-        # Scrape out the existing significant form field values.
-        form = dict()
-        for fn in ('email', 'fullname', 'title', 'organization', 'location',
-                   'locale', 'timezone', 'irc_nickname', 'bio', 'interests'):
-            form[fn] = doc.find('#profile-edit *[name="%s"]' % fn).val()
-
-        # Fill out the form with websites.
-        form.update({'locale': 'nl'})
-        form.update({'timezone': 'Europe/Amsterdam'})
-
-        # Submit the form, verify redirect to profile detail
-        r = self.client.post(url, form, follow=True)
-        doc = pq(r.content)
-        eq_(1, doc.find('#profile-head').length)
-
-        p = UserProfile.objects.get(user=user)
-
-        # Verify locale saved in the profile.
-        eq_('nl', p.locale)
-
-        # Verify the saved locale appears in the editing form
-        url = reverse('devmo.views.profile_edit',
-                      args=(user.username,))
-        r = self.client.get(url, follow=True)
-        doc = pq(r.content)
-        ok_('nl', doc.find('#profile-edit select#id_locale option[value="nl"]'
-                           '[selected="selected"]'))
-
-        # TODO: Mock this part out...
-        """
-        r = requests.get(DekiUserBackend.profile_by_id_url % '=testaccount')
-        doc = pq(r.content)
-        eq_('nl', doc.find('language').text())
-        """
-
-    def test_bug_698126_l10n(self):
+    @mock.patch('basket.lookup_user')
+    @mock.patch('basket.subscribe')
+    @mock.patch('basket.unsubscribe')
+    def test_bug_698126_l10n(self, unsubscribe, subscribe, lookup_user):
         """Test that the form field names are localized"""
+        lookup_user.return_value = mock_lookup_user()
+        subscribe.return_value = True
+        unsubscribe.return_value = True
         user = User.objects.get(username='testuser')
         self.client.login(username=user.username,
             password=TESTUSER_PASSWORD)
@@ -472,6 +400,34 @@ class ProfileViewsTest(TestCase):
         logging.debug("HEAD %s" % r.items())
         logging.debug("CONT %s" % r.content)
         ok_(False)
+
+    def test_bug_811751_banned_profile(self):
+        """A banned user's profile should not be viewable"""
+        profile = UserProfile.objects.get(user__username='testuser')
+        user = profile.user
+        url = reverse('devmo.views.profile_view',
+                      args=(user.username,))
+
+        # Profile viewable if not banned
+        response = self.client.get(url, follow=True)
+        self.assertNotEqual(response.status_code, 403)
+
+        # Ban User
+        admin = User.objects.get(username='admin')
+        testuser = User.objects.get(username='testuser')
+        ban = UserBan(user=testuser, by=admin,
+                      reason='Banned by unit test.',
+                      is_active=True)
+        ban.save()
+
+        # Profile not viewable if banned
+        response = self.client.get(url, follow=True)
+        self.assertEqual(response.status_code, 403)
+
+        # Admin can view banned user's profile
+        self.client.login(username='admin', password='testpass')
+        response = self.client.get(url, follow=True)
+        self.assertNotEqual(response.status_code, 403)
 
 
 def get_datetime_from_string(string, string_format):
@@ -506,12 +462,23 @@ class EventsViewsTest(test_utils.TestCase):
         r = self.client.get(url, follow=True)
         eq_(200, r.status_code)
 
-        # doc = pq(r.content)
-        # past events ordered newest to oldest
-        # rows = doc.find('table#past tr')
-        # prev_end_datetime = datetime.datetime.today()
-        # rows.each(check_event_date)
+    def test_events_map_flag(self):
+        url = reverse('devmo.views.events')
 
+        r = self.client.get(url, follow=True)
+        eq_(200, r.status_code)
+        doc = pq(r.content)
+        eq_([], doc.find('#map_canvas'))
+        ok_("maps.google.com" not in r.content)
+
+        events_map_flag = Flag.objects.create(name='events_map', everyone=True)
+        events_map_flag.save()
+
+        r = self.client.get(url, follow=True)
+        eq_(200, r.status_code)
+        doc = pq(r.content)
+        eq_(1, len(doc.find('#map_canvas')))
+        ok_("maps.google.com" in r.content)
 
 class SoapboxViewsTest(test_utils.TestCase):
     fixtures = ['devmo_calendar.json']
@@ -564,3 +531,29 @@ class SoapboxViewsTest(test_utils.TestCase):
 
         doc = pq(r.content)
         eq_([], doc.find('div.global-notice'))
+
+class LoggingTests(test_utils.TestCase):
+    urls = 'devmo.tests.logging_urls'
+
+    def setUp(self):
+        self.old_logging = settings.LOGGING
+
+    def tearDown(self):
+        settings.LOGGING = self.old_logging
+
+    def test_no_mail_handler(self):
+        try:
+            response = self.client.get('/en-US/test_exception/')
+            eq_(500, response.status_code)
+            eq_(0, len(mail.outbox))
+        except:
+            pass
+
+    def test_mail_handler(self):
+        settings.LOGGING['loggers']['django.request'] = ['console', 'mail_admins']
+        try:
+            response = self.client.get('/en-US/test_exception/')
+            eq_(500, response.status_code)
+            eq_(1, len(mail.outbox))
+        except:
+            pass

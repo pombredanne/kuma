@@ -167,7 +167,7 @@
 #search-browse { background: url("../img/demos/bg-darts.png") center center no-repeat; text-align: center; padding: 1em 15%; margin: 0 0 60px; }
 #search-browse .demo-search { width: 45%; float: left; }
 #search-browse #demo-tags { width: 45%; float: right; position: relative; }
-#demo-tags .button { font-size: 1.2em; position: relative; z-index: 35; }
+#demo-tags .button { font-size: 1.2em; position: relative; z-index: 11; }
 #search-browse b { color: #fff; font: normal 24px "Milk", serif; text-shadow: 1px 1px 1px rgba(0,0,0,.5); -moz-transform: rotate(-20deg); -webkit-transform: rotate(-20deg); transform: rotate(-20deg); }
 
 /* @Demo @Detail *********/
@@ -300,7 +300,7 @@
 /* @Comments *********/
 #comments { background: #fff; margin: 0 0 40px; border-radius: 6px; box-shadow: 1px 1px 3px rgba(0,0,0,.4); }
 #comments header { padding: 20px 30px; text-transform: uppercase; }
-#comments header h1 { color: #333; font-size: 1.333em; margin: 0 0 .25em; }
+#comments header h1 { color: #333; font-size: 1.333em; margin: 0 0 .25em; letter-spacing: normal; }
 #comments header p { margin: 0; font-size: .857em; }
 #comments a { color: #861215; }
 #comments a:hover, #comments a:focus, #comments a:active { color: #c11317; }
@@ -366,9 +366,9 @@
 #page-head.gallery .author .edit .button { color: #fff; }
 
 /* @Gallery @Head *********/
-.gallery-head { clear: both; }
+.gallery-head { clear: both; position: relative; z-index: 11; }
 .gallery-head:after { content: "."; display: block; clear: both; height: 0; visibility: hidden; }
-.gallery-head .count { font-size: 1.428em; float: left; }
+.gallery-head .count { float: left; }
 .gallery-head .count .button { font-size: .636em; margin-left: 15px; position: relative; top: -2px; }
 .gallery-head .sort { float: right; font-size: .786em; margin: .5em 0 0; }
 .gallery-head .sort li { display: inline; padding: 0; margin: 0 0 0 20px; background: none; }
@@ -467,7 +467,7 @@
 /* @Submission @Form *********/
 #page-head.form { padding: 20px 30px; background-color: #fff; background-color: rgba(255,255,255,.8); -moz-border-radius: 5px; -webkit-border-radius: 5px; border-radius: 5px; -moz-box-shadow: 1px 1px 4px rgba(0,0,0,.4); -webkit-box-shadow: 1px 1px 4px rgba(0,0,0,.4); box-shadow: 1px 1px 4px rgba(0,0,0,.4); }
 .section-demos .submission .section { padding: 3.75em 0 0; border-top: 5px double rgba(100,120,130,.25); }
-.section-demos .submission .section > legend b { margin-top: 18px; font: 200 1.714em/1 "Bebas Neue", "League Gothic", Haettenschweiler, "Arial Narrow", sans-serif; text-transform: uppercase; letter-spacing: .5px; }
+.section-demos .submission .section > legend b { margin-top: 18px; margin-left: 20px; font: 200 1.714em/1 "Bebas Neue", "League Gothic", Haettenschweiler, "Arial Narrow", sans-serif; text-transform: uppercase; letter-spacing: .5px; }
 .section-demos .submission .section.notitle { padding-top: 18px; }
 
 /* @Sidebar @modules *********/

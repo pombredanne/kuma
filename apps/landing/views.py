@@ -1,70 +1,47 @@
-from django.conf import settings
-from django.contrib import messages
-from django.http import HttpResponseRedirect
+import time
+import json
 
-import jingo
-from tower import ugettext as _
-from waffle.decorators import waffle_switch
 import basket
+from basket.base import BasketException
+
+from django.conf import settings
+from django.http import HttpResponseServerError
+from django.shortcuts import render
+
+import constance.config
+from waffle import flag_is_active
+from waffle.decorators import waffle_switch
+from users.models import User
 
 from devmo import (SECTION_USAGE, SECTION_ADDONS, SECTION_APPS, SECTION_MOBILE,
-                   SECTION_WEB, SECTION_MOZILLA)
+                   SECTION_WEB, SECTION_MOZILLA, SECTION_HACKS)
 from feeder.models import Bundle, Feed
 from demos.models import Submission
-from landing.forms import SubscriptionForm
-from sumo.urlresolvers import reverse
-
+from devmo.forms import SubscriptionForm
 
 def home(request):
     """Home page."""
-
-    demos = (Submission.objects.all_sorted('upandcoming')
-            .exclude(hidden=True))[:5]
-
-    tweets = []
-    for section in SECTION_USAGE:
-        tweets += Bundle.objects.recent_entries(section.twitter)[:2]
-    tweets.sort(key=lambda t: t.last_published, reverse=True)
+    demos = (Submission.objects.all_sorted('upandcoming').exclude(hidden=True))[:12]
 
     updates = []
     for s in SECTION_USAGE:
-        updates += Bundle.objects.recent_entries(s.updates)[:1]
+        updates += Bundle.objects.recent_entries(s.updates)[:5]
 
-    return jingo.render(request, 'landing/home.html', {
-        'demos': demos, 'updates': updates, 'tweets': tweets})
-
-
-def addons(request):
-    """Add-ons landing page."""
-    extra = {
-        'discussions': Feed.objects.get(
-            shortname='amo-forums').entries.all()[:4],
-        'comments': Feed.objects.get(
-            shortname='amo-blog-comments').entries.all()[:4],
-    }
-    return common_landing(request, section=SECTION_ADDONS, extra=extra)
-
-
-def mozilla(request):
-    """Mozilla Applications landing page."""
-    return common_landing(request, section=SECTION_MOZILLA)
+    return render(request, 'landing/homepage.html',
+                  {'demos': demos, 'updates': updates,
+                    'current_challenge_tag_name': 
+                    str(constance.config.DEMOS_DEVDERBY_CURRENT_CHALLENGE_TAG).strip()})
 
 
 def search(request):
     """Google Custom Search results page."""
     query = request.GET.get('q', '')
-    return jingo.render(request, 'landing/searchresults.html',
-                        {'query': query})
+    return render(request, 'landing/searchresults.html',
+                  {'query': query})
 
-
-def mobile(request):
-    """Mobile landing page."""
-    return common_landing(request, section=SECTION_MOBILE)
-
-
-def web(request):
-    """Web landing page."""
-    return common_landing(request, section=SECTION_WEB)
+def hacks(request):
+    """Hacks landing page."""
+    return common_landing(request, section=SECTION_HACKS)
 
 
 def apps(request):
@@ -73,63 +50,65 @@ def apps(request):
                           extra={'form': SubscriptionForm()})
 
 
-def apps_subscription(request):
-    form = SubscriptionForm(data=request.POST)
-    context = {'form': form}
-    if form.is_valid():
-        optin = 'N'
-        if request.locale == 'en-US':
-            optin = 'Y'
-        basket.subscribe(email=form.cleaned_data['email'],
-                         newsletters=settings.BASKET_APPS_NEWSLETTER,
-                         format=form.cleaned_data['format'],
-                         lang=request.locale,
-                         optin=optin)
-        messages.success(request,
-            _('Thank you for subscribing to the Apps Developer newsletter.'))
-        if not request.is_ajax():
-            return HttpResponseRedirect(reverse('apps'))
-        del context['form']
+def apps_newsletter(request):
+    if request.method == 'POST':
+        form = SubscriptionForm(request.locale, data=request.POST)
+        context = {'subscription_form': form}
+        if form.is_valid():
+            optin = 'N'
+            if request.locale == 'en-US':
+                optin = 'Y'
+            for i in range(constance.config.BASKET_RETRIES):
+                try:
+                    result = basket.subscribe(email=form.cleaned_data['email'],
+                                 newsletters=settings.BASKET_APPS_NEWSLETTER,
+                                 country=form.cleaned_data['country'],
+                                 format=form.cleaned_data['format'],
+                                 lang=request.locale,
+                                 optin=optin)
+                    if result.get('status') != 'error':
+                        break
+                except BasketException:
+                    if i == constance.config.BASKET_RETRIES:
+                        return HttpResponseServerError()
+                    else:
+                        time.sleep(constance.config.BASKET_RETRY_WAIT * i)
+            del context['subscription_form']
 
-    return (jingo.render(request, 'landing/apps_subscribe.html', context)
-            if request.is_ajax() else
-            common_landing(request, section=SECTION_APPS, extra=context))
+    else:
+        context = {'subscription_form': SubscriptionForm(request.locale)}
+
+    return render(request, 'landing/apps_newsletter.html', context)
 
 
 def learn(request):
     """Learn landing page."""
-    return jingo.render(request, 'landing/learn.html')
+    return render(request, 'landing/learn.html')
 
 
 def learn_html(request):
     """HTML landing page."""
-    return jingo.render(request, 'landing/learn_html.html')
+    return render(request, 'landing/learn_html.html')
 
-@waffle_switch('html5_landing')
-def learn_html5(request):
-    """HTML5 landing page."""
-    demos = (Submission.objects.all_sorted()
-             .filter(featured=True, taggit_tags__name__in=['tech:html5']))[:6]
-    return jingo.render(request, 'landing/learn_html5.html', {'demos': demos})
 
 def learn_css(request):
     """CSS landing page."""
-    return jingo.render(request, 'landing/learn_css.html')
+    return render(request, 'landing/learn_css.html')
 
 
 def learn_javascript(request):
     """JavaScript landing page."""
-    return jingo.render(request, 'landing/learn_javascript.html')
+    return render(request, 'landing/learn_javascript.html')
 
 
 def promote_buttons(request):
     """Bug 646192: MDN affiliate buttons"""
-    return jingo.render(request, 'landing/promote_buttons.html')
+    return render(request, 'landing/promote_buttons.html')
 
 
 def forum_archive(request):
     """Forum Archive from phpbb-static landing page."""
-    return jingo.render(request, 'landing/forum_archive.html')
+    return render(request, 'landing/forum_archive.html')
 
 
 def common_landing(request, section=None, extra=None):
@@ -144,4 +123,4 @@ def common_landing(request, section=None, extra=None):
     if extra:
         data.update(extra)
 
-    return jingo.render(request, 'landing/%s.html' % section.short, data)
+    return render(request, 'landing/%s.html' % section.short, data)

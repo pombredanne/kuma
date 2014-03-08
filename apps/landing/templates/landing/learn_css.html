@@ -1,6 +1,6 @@
 {% extends "landing/base_learn.html" %}
 
-{% block pageid %}learn-css{% endblock %}
+{% block body_attributes %}id="learn-css"{% endblock %}
 
 {% block title %}{{ page_title(_('Learn CSS')) }}{% endblock %}
 
@@ -70,7 +70,7 @@
       <h2>{{ _('Intermediate Level') }}</h2>
       <ul class="link-list">
         <li>
-          <h3 class="title"><a href="{{ devmo_url('CSS_Reference')}}">{{ _('CSS Reference') }}</a></h3>
+          <h3 class="title"><a href="{{ devmo_url('CSS/CSS_Reference')}}">{{ _('CSS Reference') }}</a></h3>
           <h4 class="source">MDN</h4>
           <p>{{ _('Complete reference to CSS, with details on support by Firefox and other browsers.') }}</p>
         </li>
@@ -111,7 +111,7 @@
           <p>{{ _('A quick introduction to some of the core features introduced in CSS3.') }}</p>
         </li>
         <li>  
-          <h3 class="title"><a href="{{ devmo_url('/En/CSS/Using_CSS_transforms')}}">{{ _('Using CSS Transforms') }}</a> <span class="tag css3" title="{{ _('This site features CSS3') }}">(CSS3)</span></h3>
+          <h3 class="title"><a href="{{ devmo_url('CSS/Using_CSS_transforms')}}">{{ _('Using CSS Transforms') }}</a> <span class="tag css3" title="{{ _('This site features CSS3') }}">(CSS3)</span></h3>
           <h4 class="source">MDN</h4>
           <p>{{ _('Apply rotation, skewing, scaling, and translation using CSS.') }}</p>
         </li>
@@ -140,7 +140,7 @@
   <section id="learn-p2pu">
     {% trans %}
     <h2>Are you tired of learning CSS on your own?<br> Do you want to join a community of people who are learning CSS and other open web technologies?</h2>
-    <p>Consider signing up for free online peer study groups through <a href="http://p2pu.org/">Peer-to-Peer University's<span title="Peer-to-Peer University"></span></a> <a href="https://p2pu.org/en/schools/school-of-webcraft">School of Webcraft</a>. Share your discoveries, struggles, and victories with others who are learning the same things.</p>
+    <p>Consider signing up for free online peer study groups through Peer-to-Peer University's<span title="Peer-to-Peer University"></span>  <a href="https://p2pu.org/en/schools/school-of-webcraft">School of Webcraft</a>. Share your discoveries, struggles, and victories with others who are learning the same things.</p>
     {% endtrans %}
     </section>
 

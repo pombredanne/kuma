@@ -1,6 +1,7 @@
 """Feeds for documents"""
 import cgi
 import datetime
+import json
 import urllib
 import validate_jsonp
 
@@ -9,7 +10,6 @@ from django.db.models import F
 from django.contrib.syndication.views import Feed
 from django.utils.feedgenerator import (SyndicationFeed, Rss201rev2Feed,
                                         Atom1Feed)
-import django.utils.simplejson as json
 from django.utils.translation import ugettext as _
 
 from sumo.urlresolvers import reverse
@@ -19,7 +19,8 @@ from wiki.helpers import diff_table, tag_diff_table, compare_url, colorize_diff
 from wiki.models import Document, Revision, AttachmentRevision
 
 
-MAX_FEED_ITEMS = getattr(settings, 'MAX_FEED_ITEMS', 100)
+MAX_FEED_ITEMS = getattr(settings, 'MAX_FEED_ITEMS', 500)
+DEFAULT_FEED_ITEMS = 50
 
 
 class DocumentsFeed(Feed):
@@ -267,9 +268,19 @@ class RevisionsFeed(DocumentsFeed):
 
     def items(self):
         items = Revision.objects
+        limit = int(self.request.GET.get('limit', DEFAULT_FEED_ITEMS))
+        page = int(self.request.GET.get('page', 1))
+
+        start = ((page-1) * limit)
+        finish = start + limit
+
+        if not limit or limit > MAX_FEED_ITEMS:
+            limit = MAX_FEED_ITEMS
+
         if self.request.GET.get('all_locales', False) is False:
             items = items.filter(document__locale=self.request.locale)
-        return items.order_by('-created')[:MAX_FEED_ITEMS]
+
+        return items.order_by('-created')[start:finish]
 
     def item_title(self, item):
         return "%s (%s)" % (item.document.full_path, item.document.locale)
@@ -346,7 +357,9 @@ class RevisionsFeed(DocumentsFeed):
         return description
 
     def item_link(self, item):
-        return reverse('wiki.document', args=[item.document.full_path])
+        return self.request.build_absolute_uri(
+            reverse('wiki.views.document', locale=item.document.locale,
+                    args=(item.document.slug,)))
 
     def item_pubdate(self, item):
         return item.created

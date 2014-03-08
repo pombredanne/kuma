@@ -1,3 +1,5 @@
+# coding=utf-8
+
 import difflib
 import re
 import urllib
@@ -5,12 +7,22 @@ import urllib
 import constance.config
 from jingo import register
 import jinja2
+from pyquery import PyQuery as pq
 from tidylib import tidy_document
 from tower import ugettext as _
+import logging
+
+from django.contrib.contenttypes.models import ContentType
 
 from sumo.urlresolvers import reverse
+import wiki
+import wiki.content
 from wiki import DIFF_WRAP_COLUMN
-from wiki import parser
+
+from teamwork.shortcuts import build_policy_admin_links
+
+
+register.function(build_policy_admin_links)
 
 
 def compare_url(doc, from_id, to_id):
@@ -80,6 +92,55 @@ def _massage_diff_content(content):
     return content
 
 
+@register.filter
+def bugize_text(content):
+    content = jinja2.escape(content)
+    content = re.sub(r'bug\s+#?(\d+)',
+                  jinja2.Markup('<a href="https://bugzilla.mozilla.org/'
+                                'show_bug.cgi?id=\\1" '
+                                'target="_blank">bug \\1</a>'),
+                  content)
+    return content
+
+
+@register.function
+def format_comment(rev):
+    """ Massages revision comment content after the fact """
+
+    prev_rev = rev.get_previous()
+    comment = bugize_text(rev.comment if rev.comment else "")
+
+    #  If a page move, say so
+    if prev_rev and prev_rev.slug != rev.slug:
+        comment += jinja2.Markup('<span class="slug-change">'
+                                 'Moved From <strong>%s</strong> '
+                                 'to <strong>%s</strong></span>') % (
+                                     prev_rev.slug, rev.slug)
+
+    return comment
+
+
+@register.function
+def revisions_unified_diff(from_revision, to_revision):
+    if from_revision == None or to_revision == None:
+        return "Diff is unavailable."
+    fromfile = u'[%s] %s #%s' % (from_revision.document.locale,
+                                 from_revision.document.title,
+                                 from_revision.id)
+    tofile = u'[%s] %s #%s' % (to_revision.document.locale,
+                               to_revision.document.title,
+                               to_revision.id)
+    tidy_from, errors = _massage_diff_content(from_revision.content)
+    tidy_to, errors = _massage_diff_content(to_revision.content)
+    diff = u'\n'.join(difflib.unified_diff(
+        tidy_from.splitlines(),
+        tidy_to.splitlines(),
+        fromfile=fromfile,
+        tofile=tofile
+    ))
+    return diff
+
+
 @register.function
 def diff_table(content_from, content_to, prev_id, curr_id):
     """Creates an HTML diff of the passed in content_from and content_to."""
@@ -90,11 +151,11 @@ def diff_table(content_from, content_to, prev_id, curr_id):
     to_lines = tidy_to.splitlines()
     try:
         diff = html_diff.make_table(from_lines, to_lines,
-                                    _("Revision %s") % prev_id,
-                                    _("Revision %s") % curr_id,
-                                    context=True,
-                                    numlines=constance.config.DIFF_CONTEXT_LINES
-                                   )
+                                _("Revision %s") % prev_id,
+                                _("Revision %s") % curr_id,
+                                context=True,
+                                numlines=constance.config.DIFF_CONTEXT_LINES
+                               )
     except RuntimeError:
         # some diffs hit a max recursion error
         message = _(u'There was an error generating the content.')
@@ -138,7 +199,42 @@ def colorize_diff(diff):
     return diff
 
 
+@register.filter
+def wiki_bleach(val):
+    from wiki.models import Document
+    return jinja2.Markup(Document.objects.clean_content(val))
+
+
+@register.filter
+def selector_content_find(document, selector):
+    """
+    Provided a selector, returns the relevant content from the document
+    """
+    summary = ''
+    try:
+      page = pq(document.rendered_html)
+      summary = page.find(selector).text()
+    except:
+      pass
+    return summary
+
 
 @register.function
-def generate_video(v):
-    return jinja2.Markup(parser.generate_video(v))
+def document_zone_management_links(user, document):
+    links = {'add': None, 'change': None}
+    stack = document.find_zone_stack()
+    zone = (len(stack) > 0) and stack[0] or None
+
+    # Enable "add" link if there is no zone for this document, or if there's a
+    # zone but the document is not itself the root (ie. to add sub-zones).
+    if ((not zone or zone.document != document) and
+            user.has_perm('wiki.add_documentzone')):
+        links['add'] = '%s?document=%s' % (
+            reverse('admin:wiki_documentzone_add'), document.id)
+    
+    # Enable "change" link if there's a zone, and the user has permission.
+    if zone and user.has_perm('wiki.change_documentzone'):
+        links['change'] = reverse('admin:wiki_documentzone_change',
+                                  args=(zone.id,))
+
+    return links

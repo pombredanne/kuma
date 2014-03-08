@@ -71,20 +71,35 @@ NOSE_ARGS = [
     '--logging-clear-handlers',
     '--with-xunit',
 ]
+ES_INDEX_PREFIX = 'mdn_$JOB_NAME'
+ES_URLS = ['http://jenkins-es20:9200']
+ES_INDEXES = {'default': 'main_index'}
+ES_INDEXING_TIMEOUT = 30
+ES_LIVE_INDEX = True
+ES_DISABLED = False
+
 SETTINGS
 
 
 echo "Starting tests..." `date`
 export FORCE_DB='yes sir'
 
-# with-coverage excludes sphinx so it doesn't conflict with real builds.
-if [[ $2 = 'with-coverage' ]]; then
-    # Add 'search' app back in, someday
-    coverage run manage.py test actioncounters contentflagging dashboards demos devmo landing users wiki -v 2 --noinput
-    coverage xml $(find apps lib -name '*.py')
+if [[ $1 = '--with-coverage' ]]; then
+    coverage run manage.py test actioncounters contentflagging dashboards demos devmo kpi landing search users wiki -v 2 --noinput
+    coverage xml $(find apps/actioncounters apps/contentflagging apps/dashboards apps/demos apps/devmo apps/kpi apps/landing apps/search apps/users apps/wiki lib -name '*.py')
 else
-    # Add 'search' app back in, someday
-    python manage.py test actioncounters contentflagging dashboards demos devmo landing users wiki -v 2 --noinput
+    python manage.py test actioncounters contentflagging dashboards demos devmo kpi landing search users wiki -v 2 --noinput
 fi
+echo "tests complete" `date`
+
+pip install pep8
+echo "Starting pep8..." `date`
+pep8 apps/ > pep8_report.txt
+echo "pep8 complete" `date`
+
+pip install pylint
+echo "Starting pylint..." `date`
+find apps/ -iname "*.py" | xargs pylint -f parseable > pylint_report.txt
+echo "pylint complete" `date`
 
 echo 'shazam!'

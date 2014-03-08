@@ -31,9 +31,14 @@ class SECTION_WEB:
     twitter = 'twitter-web'
     updates = 'updates-web'
 
+class SECTION_HACKS:
+    short = 'hacks'
+    pretty = _(u'Moz Hacks')
+    twitter = 'twitter-moz-hacks'
+    updates = 'updates-moz-hacks'
 
-SECTION_USAGE = _sections = (SECTION_WEB, SECTION_MOBILE, SECTION_ADDONS,
-                             SECTION_APPS, SECTION_MOZILLA)
+
+SECTION_USAGE = _sections = (SECTION_HACKS,)
 
 SECTIONS = dict((section.short, section)
                 for section in _sections)
@@ -60,3 +65,17 @@ INTEREST_SUGGESTIONS = [
     "technical review",
     "editorial review",
 ]
+
+
+# Django compatibility shim; remove once we're on Django 1.4,
+# and replace calls to this with:
+# from django.db.utils import DatabaseError
+def get_mysql_error():
+    import django
+    if django.VERSION[:2] in ((1, 2), (1, 3)):
+        import MySQLdb
+        return MySQLdb.OperationalError
+    else:
+        from django.db.utils import DatabaseError
+        return DatabaseError
+

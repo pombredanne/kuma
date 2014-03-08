@@ -1,18 +1,10 @@
-from django.conf.urls.defaults import *
+from django.conf.urls import patterns, url
 
 urlpatterns = patterns('landing.views',
     url(r'^$', 'home', name='home'),
-    url(r'^addons/?$', 'addons', name='addons'),
-    url(r'^mozilla/?$', 'mozilla', name='mozilla'),
-    url(r'^mobile/?$', 'mobile', name='mobile'),
-    # TODO: Enabled until switchover to self-hosted kuma wiki search. Waffle me?
-    url(r'^search/?$', 'search', name='search'),
-    url(r'^web/?$', 'web', name='web'),
-    url(r'^(?i)apps/?$', 'apps', name='apps'),
-    url(r'^apps/subscription/?$', 'apps_subscription', name='apps_subscription'),
+    url(r'^newsletter/?$', 'apps_newsletter', name='apps_newsletter'),
     url(r'^learn/?$', 'learn', name='learn'),
     url(r'^learn/html/?$', 'learn_html', name='learn_html'),
-    url(r'^learn/html5/?$', 'learn_html5', name='learn_html5'),
     url(r'^learn/css/?$', 'learn_css', name='learn_css'),
     url(r'^learn/javascript/?$', 'learn_javascript', name='learn_javascript'),
     url(r'^promote/?$', 'promote_buttons', name='promote'),

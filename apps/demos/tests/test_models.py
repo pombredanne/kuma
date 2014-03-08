@@ -1,11 +1,11 @@
+# coding=utf-8
+
+# This Python file uses the following encoding: utf-8
+# see also: http://www.python.org/dev/peps/pep-0263/
 import logging
-import re
-import urlparse
-import time
 import zipfile
-import os
 from os import unlink
-from os.path import basename, dirname, isfile, isdir
+from os.path import dirname, isfile, isdir
 from shutil import rmtree
 
 try:
@@ -19,9 +19,7 @@ settings.DEMO_MAX_FILESIZE_IN_ZIP = 1 * 1024 * 1024
 settings.DEMO_MAX_ZIP_FILESIZE = 1 * 1024 * 1024
 
 
-from django.http import HttpRequest
 from django.test import TestCase
-from django.test.client import Client
 
 from django.core.exceptions import ValidationError
 from django.contrib.auth.models import User
@@ -30,17 +28,17 @@ from django.core.files.base import ContentFile
 
 from django.template.defaultfilters import slugify
 
-from nose.tools import assert_equal, with_setup, assert_false, eq_, ok_
-from nose.plugins.attrib import attr
+from nose.tools import assert_false, eq_, ok_
 
 from demos.models import Submission
 import demos.models
 demos.models.DEMO_MAX_FILESIZE_IN_ZIP = 1 * 1024 * 1024
 
-from demos.forms import SubmissionEditForm, SubmissionNewForm
+from demos.tests import make_users, build_submission, build_hidden_submission
 
 
-def save_valid_submission(title='hello world', desc = 'This is a hello world demo'):
+def save_valid_submission(title='hello world',
+                          desc='This is a hello world demo'):
     testuser = User.objects.get(username='testuser')
     s = Submission(title=title, slug=slugify(title),
         description=desc,
@@ -51,8 +49,12 @@ def save_valid_submission(title='hello world', desc = 'This is a hello world dem
     zf.writestr('index.html', """<html> </html>""")
     zf.close()
     s.demo_package.save('play_demo.zip', ContentFile(fout.getvalue()))
-    s.screenshot_1.save('screenshot_1.jpg', ContentFile(open(
-        '%s/fixtures/screenshot_1.png' % ( dirname(dirname(__file__)), ) ).read()))
+    s.screenshot_1.save('screenshot_1.jpg',
+        ContentFile(
+            open('%s/fixtures/screenshot_1.png' % (dirname(dirname(__file__))))
+            .read()
+        )
+    )
     s.save()
     return s
 
@@ -60,30 +62,20 @@ def save_valid_submission(title='hello world', desc = 'This is a hello world dem
 class DemoPackageTest(TestCase):
 
     def setUp(self):
-        self.user = User.objects.create_user(
-            'tester', 'tester@tester.com', 'tester')
-        self.user.save()
+        self.user, self.admin_user, self.other_user = make_users()
 
-        self.admin_user = User.objects.create_superuser(
-            'admin_tester', 'admin_tester@tester.com', 'admint_tester')
-        self.admin_user.save()
+        hidden_prev_demo = build_hidden_submission(self.other_user,
+                                                   'hidden-submission-1')
 
-        self.other_user = User.objects.create_user(
-            'visitor', 'visitor@visitor.com', 'visitor')
-        self.other_user.save()
-
-        self.submission = self._build_submission()
+        self.submission = build_submission(self.user)
         self.old_blacklist = demos.models.DEMO_MIMETYPE_BLACKLIST
+
+        hidden_next_demo = build_hidden_submission(self.other_user,
+                                                   'hidden-submission-2')
 
     def tearDown(self):
         demos.models.DEMO_MIMETYPE_BLACKLIST = self.old_blacklist
         self.user.delete()
-
-    def _build_submission(self):
-        s = Submission(title='Hello world', slug='hello-world',
-            description='This is a hello world demo',
-            creator=self.user)
-        return s
 
     def test_demo_package_no_files(self):
         """Demo package with no files is invalid"""
@@ -198,7 +190,10 @@ class DemoPackageTest(TestCase):
         unlink(s.demo_package.path)
 
     def test_process_demo_package(self):
-        """Calling process_demo_package() should result in a directory of demo files"""
+        """
+        Calling process_demo_package() should result in a directory of demo
+        files
+        """
 
         fout = StringIO()
         zf = zipfile.ZipFile(fout, 'w')
@@ -206,7 +201,7 @@ class DemoPackageTest(TestCase):
         zf.writestr('index.html',
             """<html>
                 <head>
-                    <link rel="stylesheet" href="css/main.css" type="text/css" />
+                  <link rel="stylesheet" href="css/main.css" type="text/css" />
                 </head>
                 <body>
                     <h1>Hello world</h1>
@@ -243,7 +238,10 @@ class DemoPackageTest(TestCase):
         rmtree(path)
 
     def test_demo_html_normalized(self):
-        """Ensure a demo.html in zip file is normalized to index.html when unpacked"""
+        """
+        Ensure a demo.html in zip file is normalized to index.html when
+        unpacked
+        """
 
         fout = StringIO()
         zf = zipfile.ZipFile(fout, 'w')
@@ -272,18 +270,113 @@ class DemoPackageTest(TestCase):
 
         rmtree(path)
 
+    def test_demo_unicode_filenames(self):
+        """Bug 741660: Demo package containing filenames with non-ASCII
+        characters works"""
+
+        fout = StringIO()
+        zf = zipfile.ZipFile(fout, 'w')
+        zf.writestr('demo.html', """<html></html""")
+        zf.writestr('css/예제.css', 'h1 { color: red }')
+        zf.writestr('js/示例.js', 'alert("HELLO WORLD");')
+        zf.close()
+
+        s = Submission(title='Hello world', slug='hello-world',
+            description='This is a hello world demo',
+            creator=self.user)
+
+        s.demo_package.save('play_demo.zip', ContentFile(fout.getvalue()))
+        s.demo_package.close()
+        s.clean()
+        s.save()
+
+        s.process_demo_package()
+
+        path = s.demo_package.path.replace('.zip', '')
+
+        ok_(isdir(path))
+        ok_(isfile((u'%s/index.html' % path).encode('utf-8')))
+        ok_(isfile((u'%s/css/예제.css' % path).encode('utf-8')))
+        ok_(isfile((u'%s/js/示例.js' % path).encode('utf-8')))
+
+        rmtree(path)
+
+    def test_demo_unicode_filenames_2(self):
+        """Bug 741660: Try testing a real .zip with non-ASCII filenames"""
+        zip_fn = '%s/fixtures/css3_clock.zip' % dirname(dirname(__file__))
+
+        zf = zipfile.ZipFile(zip_fn)
+
+        s = Submission(title='Hello world', slug='hello-world',
+            description='This is a hello world demo',
+            creator=self.user)
+
+        s.demo_package.save('play_demo.zip', ContentFile(open(zip_fn).read()))
+        s.demo_package.close()
+        s.clean()
+        s.save()
+
+        s.process_demo_package()
+
+        path = s.demo_package.path.replace('.zip', '')
+
+        ok_(isdir(path))
+        ok_(isfile((u'%s/stylé.css' % path).encode('utf-8')))
+
+        rmtree(path)
+
+    def test_demo_deletion(self):
+        """Ensure that demo files are deleted along with submission record"""
+
+        fout = StringIO()
+        zf = zipfile.ZipFile(fout, 'w')
+        zf.writestr('demo.html', """<html></html""")
+        zf.writestr('css/main.css', 'h1 { color: red }')
+        zf.writestr('js/main.js', 'alert("HELLO WORLD");')
+        zf.close()
+
+        s = Submission(title='Hello world', slug='hello-world',
+            description='This is a hello world demo',
+            creator=self.user)
+
+        s.demo_package.save('play_demo.zip', ContentFile(fout.getvalue()))
+        s.demo_package.close()
+        s.clean()
+        s.save()
+
+        s.process_demo_package()
+
+        path = s.demo_package.path.replace('.zip', '')
+
+        ok_(isdir(path))
+        ok_(isfile('%s/index.html' % path))
+        ok_(isfile('%s/css/main.css' % path))
+        ok_(isfile('%s/js/main.js' % path))
+
+        s.delete()
+
+        ok_(not isfile('%s/index.html' % path))
+        ok_(not isfile('%s/css/main.css' % path))
+        ok_(not isfile('%s/js/main.js' % path))
+        ok_(not isdir(path))
+
     def test_demo_file_size_limit(self):
         """Demo package with any individual file >1MB in size is invalid"""
         s = self.submission
 
-        # HACK: Since the field's already defined, it won't pick up the settings change,
+        # HACK: Since the field's already defined, it won't pick up the
+        # settings change,
         # so force it directly in the field
-        s.demo_package.field.max_upload_size = settings.DEMO_MAX_FILESIZE_IN_ZIP
+        s.demo_package.field.max_upload_size = (
+            settings.DEMO_MAX_FILESIZE_IN_ZIP
+        )
 
         fout = StringIO()
         zf = zipfile.ZipFile(fout, 'w')
         zf.writestr('index.html', """<html> </html>""")
-        zf.writestr('bigfile.txt', ''.join('x' for x in range(0, settings.DEMO_MAX_FILESIZE_IN_ZIP + 1)))
+        zf.writestr('bigfile.txt', ''.join(
+            'x' for x in range(0, settings.DEMO_MAX_FILESIZE_IN_ZIP + 1)
+        ))
         zf.close()
         s.demo_package.save('play_demo.zip', ContentFile(fout.getvalue()))
 
@@ -291,12 +384,16 @@ class DemoPackageTest(TestCase):
             s.clean()
             ok_(False, "There should be a validation exception")
         except ValidationError, e:
-            ok_('ZIP file contains a file that is too large: bigfile.txt' in e.messages)
+            ok_('ZIP file contains a file that is too large: bigfile.txt'
+                in e.messages)
 
         unlink(s.demo_package.path)
 
     def test_demo_file_type_blacklist(self):
-        """Demo package cannot contain files whose detected types are blacklisted"""
+        """
+        Demo package cannot contain files whose detected types are
+        blacklisted
+        """
 
         sub_fout = StringIO()
         sub_zf = zipfile.ZipFile(sub_fout, 'w')
@@ -330,6 +427,13 @@ class DemoPackageTest(TestCase):
             except ValidationError, e:
                 ok_('ZIP file contains an unacceptable file: badfile' in e.messages)
 
+    def test_hidden_demo_next_prev(self):
+        """Ensure hidden demos do not display when next() or previous() are called"""
+        s = self.submission
+
+        eq_(s.previous(), None)
+        eq_(s.next(), None)
+
     def test_hidden_demo_shows_to_creator_and_admin(self):
         """Demo package with at least index.html in root is valid"""
         s = self.submission
@@ -343,8 +447,7 @@ class DemoPackageTest(TestCase):
     def test_censored_demo_shows_only_in_admin_interface(self):
         """Demo package with at least index.html in root is valid"""
         s = self.submission
-        s.censored = True
-        s.save()
+        s.censor()
 
         assert_false(s.allows_viewing_by(self.other_user))
         assert_false(s.allows_viewing_by(self.user))
@@ -354,3 +457,39 @@ class DemoPackageTest(TestCase):
         except Submission.DoesNotExist:
             ok_(True, 'Submission matching query does not exist')
         ok_(Submission.admin_manager.get(id=s.id))
+
+    def test_censored_demo_files_are_deleted(self):
+        """Demo files should be deleted when the demo is censored."""
+        fout = StringIO()
+        zf = zipfile.ZipFile(fout, 'w')
+        zf.writestr('demo.html', """<html></html""")
+        zf.writestr('css/main.css', 'h1 { color: red }')
+        zf.writestr('js/main.js', 'alert("HELLO WORLD");')
+        zf.close()
+
+        s = Submission(title='Hello world', slug='hello-world',
+            description='This is a hello world demo',
+            creator=self.user)
+
+        s.demo_package.save('play_demo.zip', ContentFile(fout.getvalue()))
+        s.demo_package.close()
+        s.clean()
+        s.save()
+
+        s.process_demo_package()
+
+        path = s.demo_package.path.replace('.zip', '')
+
+        ok_(isdir(path))
+        ok_(isfile(s.demo_package.path))
+        ok_(isfile('%s/index.html' % path))
+        ok_(isfile('%s/css/main.css' % path))
+        ok_(isfile('%s/js/main.js' % path))
+
+        s.censor(url="http://example.com/censored-explanation")
+
+        ok_(not isfile(s.demo_package.path))
+        ok_(not isfile('%s/index.html' % path))
+        ok_(not isfile('%s/css/main.css' % path))
+        ok_(not isfile('%s/js/main.js' % path))
+        ok_(not isdir(path))

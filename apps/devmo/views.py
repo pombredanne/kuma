@@ -1,23 +1,27 @@
-import jingo
-import logging
-
 from django.conf import settings
 from django.core.paginator import Paginator
-from django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404, render
 from django.http import (HttpResponseRedirect, HttpResponseForbidden)
 
 from devmo.urlresolvers import reverse
 
+import constance.config
+import basket
 from taggit.utils import parse_tags
+from waffle import flag_is_active
 
-import waffle
+from waffle import flag_is_active
 
 from access.decorators import login_required
 from demos.models import Submission
+from teamwork.models import Team
+from badger.models import Award
+from users.models import UserBan
 
 from . import INTEREST_SUGGESTIONS
-from .models import Calendar, Event, UserProfile, UserDocsActivityFeed
-from .forms import UserProfileEditForm
+from .models import Calendar, Event, UserProfile
+from .forms import (UserProfileEditForm, newsletter_subscribe,
+                    get_subscription_details, subscribed_to_newsletter)
 
 
 DOCS_ACTIVITY_MAX_ITEMS = getattr(settings,
@@ -34,7 +38,7 @@ def events(request):
         "ABQIAAAAijZqBZcz-rowoXZC1tt9iRT5rHVQFKUGOHoyfP"
         "_4KyrflbHKcRTt9kQJVST5oKMRj8vKTQS2b7oNjQ")
 
-    return jingo.render(request, 'devmo/calendar.html', {
+    return render(request, 'devmo/calendar.html', {
         'upcoming_events': upcoming_events,
         'past_events': past_events,
         'google_maps_api_key': google_maps_api_key
@@ -44,6 +48,11 @@ def events(request):
 def profile_view(request, username):
     profile = get_object_or_404(UserProfile, user__username=username)
     user = profile.user
+
+    if (UserBan.objects.filter(user=user, is_active=True) and
+            not request.user.is_superuser):
+        return render(request, '403.html',
+                      {'reason': "bannedprofile"}, status=403)
 
     DEMOS_PAGE_SIZE = getattr(settings, 'DEMOS_PAGE_SIZE', 12)
     sort_order = request.GET.get('sort', 'created')
@@ -64,10 +73,23 @@ def profile_view(request, username):
     wiki_activity, docs_feed_items = None, None
     wiki_activity = profile.wiki_activity()
 
-    return jingo.render(request, 'devmo/profile.html', dict(
+    awards = Award.objects.filter(user=user)
+
+    if request.user.is_anonymous():
+        show_manage_roles_button = False
+    else:
+        # TODO: This seems wasteful, just to decide whether to show the button
+        roles_by_team = Team.objects.get_team_roles_managed_by(request.user,
+                                                               user)
+        show_manage_roles_button = (len(roles_by_team) > 0)
+
+    template = 'devmo/profile.html'
+
+    return render(request, template, dict(
         profile=profile, demos=demos, demos_paginator=demos_paginator,
         demos_page=demos_page, docs_feed_items=docs_feed_items,
-        wiki_activity=wiki_activity
+        wiki_activity=wiki_activity, award_list=awards,
+        show_manage_roles_button=show_manage_roles_button,
     ))
 
 
@@ -81,6 +103,7 @@ def my_profile(request):
 def profile_edit(request, username):
     """View and edit user profile"""
     profile = get_object_or_404(UserProfile, user__username=username)
+    context = {'profile': profile}
     if not profile.allows_editing_by(request.user):
         return HttpResponseForbidden()
 
@@ -90,9 +113,9 @@ def profile_edit(request, username):
         ('expertise', 'profile:expertise:')
     )
 
-    if request.method != 'POST':
 
-        initial = dict(email=profile.user.email)
+    if request.method != 'POST':
+        initial = dict(email=profile.user.email, beta=profile.beta_tester)
 
         # Load up initial websites with either user data or required base URL
         for name, meta in UserProfile.website_choices:
@@ -103,11 +126,20 @@ def profile_edit(request, username):
             initial[field] = ', '.join(t.name.replace(ns, '')
                                        for t in profile.tags.all_ns(ns))
 
-        # Finally, set up the form.
-        form = UserProfileEditForm(instance=profile, initial=initial)
+        subscription_details = get_subscription_details(profile.user.email)
+        if subscribed_to_newsletter(subscription_details):
+            initial['newsletter'] = True
+            initial['agree'] = True
+
+        # Finally, set up the forms.
+        form = UserProfileEditForm(request.locale,
+                                   instance=profile,
+                                   initial=initial)
 
     else:
-        form = UserProfileEditForm(request.POST, request.FILES,
+        form = UserProfileEditForm(request.locale,
+                                   request.POST,
+                                   request.FILES,
                                    instance=profile)
         if form.is_valid():
             profile_new = form.save(commit=False)
@@ -131,12 +163,14 @@ def profile_edit(request, username):
                                             form.cleaned_data.get(field, ''))]
                 profile_new.tags.set_ns(tag_ns, *tags)
 
+            newsletter_subscribe(request, profile_new.user.email,
+                                 form.cleaned_data)
             return HttpResponseRedirect(reverse(
                     'devmo.views.profile_view', args=(profile.user.username,)))
+    context['form'] = form
+    context['INTEREST_SUGGESTIONS'] = INTEREST_SUGGESTIONS
 
-    return jingo.render(request, 'devmo/profile_edit.html', dict(
-        profile=profile, form=form, INTEREST_SUGGESTIONS=INTEREST_SUGGESTIONS
-    ))
+    return render(request, 'devmo/profile_edit.html', context)
 
 
 @login_required

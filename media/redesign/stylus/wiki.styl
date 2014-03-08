@@ -1,0 +1,875 @@
+@import 'includes/vars'
+@import 'includes/mixins'
+@import 'includes/grid'
+
+/* mixins applying only to the wiki */
+make-wiki-blocks-flat() {
+  #wiki-content, #wiki-right, #wiki-left {
+    margin-right: 0;
+    width: auto !important;
+    float: none;
+    padding-bottom: (grid-spacing * 2);
+  }
+}
+
+enable-toc-toggle() {
+  #toc {
+    padding: (grid-spacing / 2) grid-spacing;
+
+    .toggler {
+      pointer-events: auto;
+      color: link-color;
+
+      i {
+        display: inline-block;
+      }
+    }
+
+    .toggle-container {
+      display: none;
+
+      .no-js & {
+        display: block;
+      }
+    }
+  }
+}
+
+/* wiki classes to be extended */
+.wiki-block {
+  padding-top: (grid-spacing * 2);
+  margin-top: (grid-spacing * 2);
+  border-top: 1px solid button-background;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.review-base {
+  compat-important(background, #fbf8e9);
+  compat-important(border-color, #f9f3d9);
+  compat-only(color, text-color);
+}
+
+
+/* general wiki section */
+#content-main {
+  compat-only(padding, 0);
+  compat-only(width, auto);
+}
+
+.wiki-main-content {
+  background: #fff;
+  min-height: 300px;
+
+  .center {
+    remove-center-spacing();
+  }
+}
+
+/* the subnav and quick link column of the layout */
+#wiki-left {
+  position: relative;
+}
+
+/* quick links */
+.quick-links {
+  @extend .smaller;
+  position: relative;
+  margin-bottom: grid-spacing;
+
+  .title {
+    margin-bottom: 0;
+    display: inline-block;
+  }
+
+  li {
+    position: relative;
+    padding-top: list-item-spacing;
+  }
+
+  li li {
+    bidi-style(padding-left, 20px, padding-right, 0);
+  }
+
+  ul ul { /* hides submenus by default */
+    display: none;
+
+    .no-js & {
+      display: block;
+    }
+  }
+}
+
+.quick-links a, .quick-links .title, #quick-links-toggle {
+  bidi-style(padding-left, 20px, padding-right, 0);
+  color: text-color;
+  display: inline-block;
+}
+
+.quick-links a, .quick-links .title {
+  position: relative;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.quick-links .see-also {
+  background: light-background-color !important;
+  padding-left: 0;
+  margin-left: 0;
+  display: inline-block !important;
+  padding: 4px 20px;
+  width: 100%;
+  vendorize(box-sizing, border-box);
+}
+
+.quick-links {selector-icon}, #quick-links-toggle {selector-icon} {
+  bidi-style(left, -6px, right, auto);
+  font-size: 14px;
+  position: absolute;
+  top: 1px;
+
+  /* don't allow empty paragraphs by CKEditor */
+  p, div {
+    display: none;
+  }
+
+  reverse-link-decoration();
+}
+
+/* document review form stuff */
+.reviews {
+  set-message-base();
+  @extend .smaller;
+  @extend .review-base
+
+  p {
+    margin: 0;
+  }
+
+  li {
+    padding-top: list-item-spacing;
+  }
+
+  button {
+    compat-important(font-size, smaller-font-size);
+  }
+}
+
+/* wiki article display */
+article {
+  position: relative;
+
+  .external {
+    white-space: nowrap;
+
+    &:before {
+      content: '\f08e';
+      font-family: FontAwesome;
+      padding: 0 2px 0 0;
+      color: #bbb;
+      font-size: 10px;
+      display: inline-block;
+    }
+
+    &:hover, &:focus {
+      &:before {
+        text-decoration: none;
+      }
+    }
+  }
+
+  a {
+    text-decoration: underline;
+
+    &:hover, &:focus {
+      text-decoration: none;
+    }
+  }
+}
+
+/* header and draft notices */
+.document-head {
+  position: relative;
+  clear: both;
+}
+
+/* search navigator near article heading */
+.from-search {
+  h1 {
+    display: inline-block;
+  }
+}
+
+.from-search-spacer {
+    padding-left: (grid-spacing * 2);
+}
+
+.from-search-previous-box, .from-search-next-box {
+  display: none;
+}
+
+.from-search-previous, .from-search-next {
+  position: absolute;
+  top: (grid-spacing * .75) + 2px;
+  display: block;
+  compat-only(font-size, 24px);
+}
+
+.from-search-previous {
+  left: 0;
+}
+
+.from-search-next {
+  right: 0;
+}
+
+.from-search-navigate {
+  @extend .larger;
+  position: relative;
+  color: #ced1d2;
+  display: inline-block;
+  height: 38px;
+  width: grid-spacing;
+  top: 4px;
+}
+
+.from-search-navigate-up, .from-search-navigate-down {
+  @extend .smaller;
+  position: absolute;
+  left: 0;
+}
+
+.from-search-navigate-up {
+  top: 0;
+}
+
+.from-search-navigate-down {
+  bottom: 0;
+}
+
+.from-search-toc {
+  @extend .smaller;
+  border: 1px solid button-shadow-color;
+  width: 200px;
+  position: absolute;
+  left: 66px;
+  top: 0;
+  z-index: 2;
+  background: button-background;
+  padding: (grid-spacing / 2);
+  color: #888;
+
+  ol {
+    list-style-type: decimal;
+    padding-left: grid-spacing;
+  }
+
+  li {
+    padding: 4px 0;
+  }
+
+  a.current {
+    color: #888;
+    pointer-events: none;
+    cursor: default;
+  }
+}
+
+.redirected-from {
+  @extend .smaller;
+  margin-top: -(grid-spacing);
+  font-style: italic;
+  opacity: 0.7;
+}
+
+/* wiki article cookie crumbs */
+.crumbs {
+  @extend .smaller;
+  margin-bottom: (grid-spacing / 2);
+
+  li {
+    bidi-style(margin-right, (grid-spacing / 2), margin-left, 0);
+    display: inline-block;
+  }
+
+  a {
+    display: block;
+
+    &:after {
+      bidi-style(margin-left, 4px, margin-right, 0, true);
+      bidi-style(content, '\f054', content, '\f053');
+      display: inline-block;
+      font-family: FontAwesome;
+      text-decoration: none;
+      color: #c1c2c4;
+      font-size: 70%;
+    }
+  }
+
+  reverse-link-decoration();
+}
+
+/* edit, language, settings, save, and cancel buttons */
+.page-buttons, #page-buttons {
+  bidi-value(float, right, left);
+  float: right;
+  margin-top: -5px;
+
+  compat-only(width, auto);
+  compat-only(top, auto);
+
+  > li {
+    margin-left: (grid-spacing / 2);
+    display: inline-block;
+    position: relative;
+
+    a, button, input[type='submit'], input[type='button'] {
+      compat-important(font-size, smaller-font-size);
+      compat-only(font-family, site-font-family);
+      compat-only(letter-spacing, normal);
+
+      &.disabled {
+        opacity: 0.8;
+      }
+    }
+
+    {selector-icon} {
+      font-size: 16px;
+    }
+  }
+
+  .submenu {
+    @extend $advanced-menu;
+  }
+}
+
+/* kumascript errors block at the top of an article */
+#kumascript-errors {
+  ul {
+    list-style-type: none;
+    padding-left: 0 !important;
+  }
+}
+
+/* wiki summary, usually displays at the top of the article */
+.summary {
+  background: light-background-color;
+  font-weight: bold;
+  padding: grid-spacing;
+  margin-bottom: grid-spacing;
+
+  prevent-last-child-spacing(p, margin-bottom);
+}
+
+/* notice at the top of the article */
+.notice {
+  set-message-base();
+  font-size: base-font-size;
+  compat-important(border-width, 2px);
+}
+
+/* warning elements */
+.warning {
+  set-message-base();
+  background: rgba( 193, 56, 50, 0.85);
+  compat-important(border-color, rgba(0, 0, 0, 0.1));
+  compat-only(color, #fff);
+  font-size: base-font-size;
+
+  pre {
+    padding: (grid-spacing / 2) !important;
+    background: none repeat scroll 0 0 rgba(255, 255, 255, 0.7) !important;
+  }
+
+  &.warning-review {
+    @extend .review-base;
+
+    p {
+      compat-important(color, text-color);
+    }
+  }
+}
+
+/* document warnings, bugs, etc. */
+div.bug, div.warning, div.overheadIndicator {
+  prevent-last-child-bottom-spacing();
+
+  pre {
+    color: text-color;
+  }
+
+}
+
+/* page attachments block at the bottom of the article */
+#page-attachments {
+  @extend .wiki-block;
+  compat-only(background, #fff);
+}
+
+#page-attachments-button {
+  compat-only(font-size, smaller-font-size);
+  compat-only(font-family, site-font-family);
+  compat-only(letter-spacing, normal);
+}
+
+/* contributors block at the bottom of the article */
+.contributors {
+  @extend .smaller;
+  color: #777;
+
+  {selector-icon} {
+    bidi-style(margin-left, 0, margin-right, icon-margin);
+    bidi-style(margin-right, icon-margin, margin-left, 0);
+  }
+}
+
+.contributor-sub {
+  padding: 4px 0;
+}
+
+/* table of contents column */
+#wiki-right, #wiki-left, #wiki-content {
+  min-height: 1px; /* ensures that when TOC becomes fixed, the column has width */
+}
+
+/* tag and file icons under the TOC */
+.tag-attach-list {
+  position: relative;
+
+  ul, > a {
+    @extend .smaller;
+    display: inline-block;
+  }
+
+  ul {
+    bidi-style(padding-left, 6px, padding-right, 0);
+    margin-bottom: 0;
+
+    li {
+      margin-bottom: 0;
+    }
+  }
+
+  > a {
+    text-decoration: none;
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+}
+
+.tags {
+  li {
+    display: inline-block;
+    margin-bottom: 7px;
+  }
+}
+
+.tags a, .tagit li {
+  @extend .smaller;
+  padding: 1px 4px;
+  border: 1px solid #cee9f9 !important; /* overrides plugin selector */
+  text-decoration: none;
+  border-radius: 4px;
+  background: light-background-color !important; /* overrides plugin selector */
+
+  .close {
+    color: #cee9f9 !important; /* overrides plugin selector */
+  }
+}
+
+.tag-list li {
+  margin-right: 6px;
+  compat-only(margin-right, 6px);
+}
+
+.tagit li {
+  font-size: base-font-size;
+}
+
+.tagit, .tagit-new {
+  border: 0 !important; /* overrides plugin selector */
+}
+
+#toc {
+  reverse-link-decoration();
+  compat-only(margin-left, 0);
+  compat-only(font-size, base-font-size);
+  compat-only(margin-left, 0, 'ol ol, ul ul');
+  background: light-background-color;
+  compat-important(padding, grid-spacing (grid-spacing * .75));
+
+  &.fixed {
+    position: fixed;
+    top: 0;
+    z-index: 10;
+    overflow-y: auto;
+  }
+
+  > ol {
+    compat-important(font-size, smaller-font-size);
+  }
+
+  ol ol {
+    padding-left: grid-spacing;
+  }
+
+  li {
+    compat-important(padding-top, (grid-spacing / 2));
+    position: relative;
+
+    &:before {
+      bidi-value(text-align, left, right);
+      bidi-style(left, -(grid-spacing * 1.5), right, auto);
+
+      position: absolute;
+      left: -(grid-spacing + (grid-spacing/2));
+      color: #484848;
+    }
+  }
+
+  .toggler {
+    pointer-events: none;
+    color: inherit;
+
+    i {
+      display: none;
+    }
+  }
+
+  .title {
+    compat-only(margin-bottom, 0);
+  }
+
+  a.title {
+    position: relative;
+    text-decoration: none;
+  }
+}
+
+
+/* adjustments to columns based on show/hide and media query */
+#wiki-column-container.wiki-right-closed #wiki-content, #wiki-column-container.wiki-left-closed #wiki-content {
+  @extend .column-9;
+}
+
+#wiki-column-container.wiki-right-closed.wiki-left-closed {
+  #wiki-content {
+    @extend .column-all;
+    float: none;
+    width: auto;
+  }
+
+  .column-container-reverse {
+    margin-left: 0;
+  }
+}
+
+/* wiki new and edit pages */
+.page-meta section, #article-head {
+  compat-only(background, none);
+}
+
+#page-tags, #page-comment {
+  @extend .wiki-block;
+}
+
+.right-icons {
+  margin-left: 0 !important;
+  margin-right: 10px !important;
+}
+
+#edit-document, #wiki-page-translate, #wiki-page-edit {
+  h1 {
+    compat-only(letter-spacing, normal);
+    compat-only(padding-left, 0);
+    line-height: 40px;
+    margin-top: (grid-spacing * 1.5);
+    margin-bottom: (grid-spacing);
+
+    .action {
+      @extend .larger;
+      display: block;
+      line-height: 20px;
+    }
+
+    em {
+      compat-only(margin-left, -3px);
+      text-transform: none;
+    }
+  }
+
+  .save-state {
+    compat-only(padding-left, 0);
+  }
+
+  h2 {
+    font-family: site-font-family;
+    font-size: 28px; /* Change to h3 after redesign launched */
+    compat-only(text-transform, none);
+    margin-bottom: grid-spacing;
+  }
+
+  h2 {selector-icon}, h3 {selector-icon} {
+    @extend .right-icons;
+  }
+}
+
+
+/* ckeditor / content area styles */
+.ckeditor-container {
+  padding: 6px;
+  border: 1px solid #eaeff2;
+}
+
+.editor-container {
+  clear: both;
+}
+
+span.cke_skin_kuma {
+  padding: 0 !important;
+}
+
+.cke_skin_kuma .cke_toolbox {
+  border-width: 0 !important;
+  margin: 0 !important;
+}
+
+#content-fields .approved header:after {
+  compat-only(background, none);
+  compat-only(width, auto);
+  compat-only(height, 0);
+}
+
+#content-fields header {
+  compat-only(background, none);
+  margin-bottom: (grid-spacing / 2);
+}
+
+
+#page-attachments {
+  h2 {selector-icon}, h3 {selector-icon} {
+    @extend .right-icons;
+  }
+}
+
+
+/* adjustments for the translation page */
+.translate main .center {
+  max-width: none;
+}
+
+#wiki-page-translate {
+  #page-buttons {
+    right: 0;
+  }
+
+  .description .approved dt {
+    compat-only(padding-top, 0);
+  }
+
+  .change-locale {
+    margin-top: (grid-spacing / 2);
+  }
+}
+
+#article-head {
+  compat-only(margin-top, 0);
+  compat-only(max-width, none);
+  compat-only(padding-top, 0);
+
+  .metadata {
+    padding-top: (grid-spacing * 2);
+    width: auto;
+    float: none;
+
+    li label {
+      width: auto;
+    }
+  }
+}
+
+.guide-links{
+  float: right;
+  padding: 0 4px 2px 0;
+  color: #999;
+}
+
+.metadata-choose-parent {
+  compat-important(background, light-background-color);
+  compat-important(border, 0);
+  compat-important(padding, grid-spacing);
+  compat-important(margin-top, 20px);
+  compat-only(border-radius, 0);
+}
+
+/* compare page */
+.compare, #revision-list {
+  ul {
+    @extend .smaller;
+    compat-only(min-width, 0);
+  }
+
+  input[type='submit'], a.button {
+    compat-only(font-size, smaller-font-size);
+  }
+}
+
+/* move page */
+.move-page #page-buttons {
+  float: none;
+}
+
+/* legacy overrides */
+.topicpage-table .Documentation, .topicpage-table .Community, .topicpage-table .Tools, .topicpage-table .Related_Topics {
+  font-family: site-font-family;
+  text-transform: none;
+}
+
+/* legacy offline notice */
+.offline-notice {
+  margin-top: -20px;
+  margin-bottom: 20px;
+  font-size: 11px;
+  margin-left: 6px;
+}
+
+#offline-notice-link {
+  color: rgb(153, 153, 153);
+
+  i {
+    margin-left: 0;
+    margin-right: 4px;
+  }
+}
+
+/* Page deletion styles */
+.delete-document {
+  textarea { 
+    width: 500px; 
+    max-width: 100%; 
+    margin-bottom: grid-spacing;
+  }
+  label { 
+    display: block; 
+  }
+}
+
+/* Styles for live sample iframe */
+
+.live-sample-frame {
+  border: 1px solid #ccc;
+  box-shadow: 0px 0px 1px 1px #ddd;
+}
+
+/*
+  Small desktop.  We go to a two-column layout
+*/
+@media media-query-small-desktop {
+
+  /* when there's a left sidebar, we need to adjust the layout to look like:  |= */
+  .wiki-left-present:not(.wiki-left-closed) {
+    #wiki-right, #wiki-content {
+      width: grid-width-column-main;
+      margin-right: 0;
+    }
+    #wiki-right {
+      enable-toc-toggle();
+      padding-bottom: (grid-spacing * 2);
+    }
+    #wiki-left {
+      float: none;
+    }
+  }
+
+  /* hide redirected from info on small screens */
+  .redirected-from {
+    display: none;
+  }
+}
+
+
+@media media-query-tablet {
+  make-wiki-blocks-flat();
+
+  .zone-landing-header-preview {
+    .column-strip, masthead-text {
+      width: 48%;
+    }
+  }
+
+  #wiki-right {
+    enable-toc-toggle();
+
+    .tag-attach-list {
+      display: inline-block;
+
+      {selector-icon} {
+        left: 0;
+        margin-left: 0;
+      }
+
+      ul {
+        margin-left: 20px;
+      }
+    }
+  }
+
+  #wiki-column-container, #wiki-content {
+    width: auto !important;
+  }
+
+  #quick-links-toggle,  #wiki-controls {
+    display: none;
+  }
+}
+
+/* Mobile updates */
+@media media-query-mobile {
+  #languages-menu-submenu {
+    right: auto;
+    left: 0;
+
+    &:before, &:after {
+      left: 10px;
+    }
+  }
+
+  /* display the attachments table as inline */
+  #page-attachments {
+
+    table {
+      border: 0;
+    }
+
+    thead {
+      display: none;
+    }
+
+    tr {
+      border-bottom: 1px solid #e0e0dc;
+
+      &:last-child {
+        border-bottom: 0;
+      }
+    }
+
+    td {
+      display: block;
+      border-bottom: 0;
+      border-right: 0;
+    }
+
+  }
+}
+
+
+/* print styling */
+@media print {
+
+  /* hide sections not important to the article */
+  #wiki-left, #wiki-right, #wiki-controls, .crumbs, .page-buttons, #page-attachments, .offline-notice, .contributors, .redirected-from, #offline-dialog-content, a.edit-section {
+    display: none;
+  }
+}

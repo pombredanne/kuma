@@ -2,17 +2,23 @@ import contextlib
 import re
 import urllib
 
+from django.core import urlresolvers
 from django.http import HttpResponsePermanentRedirect, HttpResponseForbidden
-from django.middleware import common
 from django.utils.encoding import iri_to_uri, smart_str, smart_unicode
 
 import jingo
-import MySQLdb as mysql
 import tower
 
+
+from devmo import get_mysql_error
 from sumo.helpers import urlparams
 from sumo.urlresolvers import Prefixer, set_url_prefixer, split_path
 from sumo.views import handle403
+
+
+# Django compatibility shim. Once we're on Django 1.4, do:
+# from django.db.utils import DatabaseError
+DatabaseError = get_mysql_error()
 
 
 class LocaleURLMiddleware(object):
@@ -118,8 +124,17 @@ class ReadOnlyMiddleware(object):
             return jingo.render(request, 'sumo/read-only.html', status=503)
 
     def process_exception(self, request, exception):
-        if isinstance(exception, mysql.OperationalError):
+        if isinstance(exception, DatabaseError):
             return jingo.render(request, 'sumo/read-only.html', status=503)
+
+
+def is_valid_path(request, path):
+    urlconf = getattr(request, 'urlconf', None)
+    try:
+        urlresolvers.resolve(path, urlconf)
+        return True
+    except urlresolvers.Resolver404:
+        return False
 
 
 class RemoveSlashMiddleware(object):
@@ -133,8 +148,8 @@ class RemoveSlashMiddleware(object):
     def process_response(self, request, response):
         if (response.status_code == 404
             and request.path_info.endswith('/')
-            and not common._is_valid_path(request.path_info)
-            and common._is_valid_path(request.path_info[:-1])):
+            and not is_valid_path(request, request.path_info)
+            and is_valid_path(request, request.path_info[:-1])):
             # Use request.path because we munged app/locale in path_info.
             newurl = request.path[:-1]
             if request.GET:

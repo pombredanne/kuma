@@ -547,18 +547,113 @@ article.main div.tags input.adder {
     width: 165px;
 }
 
-
-/* Document list pages */
-#document-list ul.documents {
-    margin: 10px 0;
+/* Move page styles */
+.move-page dl {
+  width: auto;
+}
+.move-page dt {
+  width: 120px;
 }
 
-#document-list ul.documents li {
-    font-size: 14px;
-    list-style: none;
-    padding: 5px 0;
+.move-page input[type=text] {
+  width: 400px;
+}
+
+.parent-suggest-container {
+  position: relative;
+}
+
+  .parent-suggest-container.show .move-lookup-link {
+    display: none;
+  }
+
+  .parent-suggest-container.show #parent-suggest-input-container {
     display: block;
-    overflow: hidden;
+    opacity: 1;
+    top: -22px;
+    left: 0;
+
+    -webkit-transition-property: opacity, top;
+    -webkit-transition-duration: .4s;
+
+    -moz-transition-property: opacity, top;
+    -moz-transition-duration: .4s;
+  }
+
+.move-lookup-link {
+  display: inline-block; 
+  margin-left: 40px; 
+  font-size: 0.8em;
+}
+#parent-suggest-input-container {
+  padding: 10px;
+  background: #eaeff2;
+  background: linear-gradient(top, #eaeff2, #d4dde4);
+  background: -moz-linear-gradient(top, #eaeff2, #d4dde4);
+  background: -webkit-linear-gradient(top, #eaeff2, #d4dde4);
+  border: 1px solid #d4dde4;
+  box-shadow: 0 5px 10px #ccc;
+  position: absolute;
+  margin-left: 20px;
+  opacity: 0;
+  top: -10px;
+  left: -90000px;
+}
+#parent-suggest-input-container:before {
+  position: absolute;
+  display: inline-block;
+  border-top: 7px solid transparent;
+  border-right: 7px solid #dfe6eb;
+  border-bottom: 7px solid transparent;
+  left: -7px;
+  top: 20px;
+  content: '';
+}
+#parent-suggest-input-container:after {
+  position: absolute;
+  display: inline-block;
+  border-top: 6px solid transparent;
+  border-right: 6px solid #dfe6eb;
+  border-bottom: 6px solid transparent;
+  left: -6px;
+  top: 21px;
+  content: '';
+}
+#parent-suggestion  {
+  width: 300px;
+}
+
+.move-descendants {
+  border: 1px solid #dfe6eb;
+  padding: 10px 10px 0 10px;
+  background: #eaeff2;
+  resize: vertical;
+  margin-bottom: 20px;
+}
+.move-descendants a {
+  display: inline-block;
+  margin: 0 0 10px 0;
+  font-size: 80%;
+}
+
+.move-page .warning {
+    color: #fff;
+}
+.warning .move-descendants-list {
+    padding: 0 0 20px 20px;
+}
+
+.move-descendants-list {
+    margin-left: 20px;
+    list-style-type: circle;
+}
+
+.move-page #page-buttons {
+  right: auto;
+  top: auto;
+  text-align: left;
+  margin: 20px 0;
+  position: relative;
 }
 
 /* Revision history */
@@ -591,6 +686,7 @@ article.main div.tags input.adder {
 
 #revision-list ul {
     margin: 5px 0;
+    min-width: 1200px;
 }
 
 #revision-list li {
@@ -653,7 +749,7 @@ article.main div.tags input.adder {
 
 #revision-list div.comment {
     display: inline-block;
-    width: 380px;
+    width: 460px;
 }
 
 #revision-list div.delete {
@@ -751,4 +847,20 @@ div.video .kbox-container {
     width: 680px;
     height: 550px;
     text-align: left;
+}
+
+
+/* Slug change for revision dashboard and wiki */
+.slug-change {
+    background: #D4DDE4;
+    border: 1px solid #CAE1F4;
+    padding: 4px 6px;
+    border-radius: 4px;
+    display: inline-block;
+    margin: 4px 0;
+    clear: both;
+}
+
+.slug-change strong {
+    color: #444;
 }

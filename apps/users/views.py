@@ -4,41 +4,42 @@ import urlparse
 from django.conf import settings
 from django.contrib import auth
 from django.contrib.auth.forms import (SetPasswordForm,
-                                       PasswordChangeForm)
+                                       PasswordChangeForm,
+                                       PasswordResetForm)
+from django.contrib.auth.decorators import permission_required
 from django.contrib.auth.models import User
 from django.contrib.auth.tokens import default_token_generator
 from django.contrib import messages
 from django.contrib.sites.models import Site
-from django.http import HttpResponseRedirect, Http404
+from django.http import HttpResponse, HttpResponseRedirect, Http404
+from django.shortcuts import render
 from django.views.decorators.http import (require_http_methods, require_GET,
                                           require_POST)
+from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.debug import sensitive_post_parameters
 
-from django.shortcuts import get_object_or_404
-from django.utils.http import base36_to_int
+from django.shortcuts import get_object_or_404, render
+from django.utils.http import base36_to_int, is_safe_url
 
 from django_browserid.forms import BrowserIDForm
 from django_browserid.auth import get_audience
 from django_browserid import auth as browserid_auth
 
-import jingo
-
 from access.decorators import logout_required, login_required
-from notifications.tasks import claim_watches
+import constance.config
+from tidings.tasks import claim_watches
+
 from sumo.decorators import ssl_required
 from sumo.urlresolvers import reverse, split_path
-from upload.tasks import _create_image_thumbnail
-from users.backends import Sha256Backend  # Monkey patch User.set_password.
 from users.forms import (ProfileForm, AvatarForm, EmailConfirmationForm,
                          AuthenticationForm, EmailChangeForm,
-                         PasswordResetForm, BrowserIDRegisterForm,
-                         EmailReminderForm)
-from users.models import Profile, RegistrationProfile, EmailChange
+                         BrowserIDRegisterForm,
+                         EmailReminderForm, UserBanForm)
+from users.models import Profile, RegistrationProfile, EmailChange, UserBan
+from users.utils import handle_login, handle_register, send_reminder_email
 from devmo.models import UserProfile
-from dekicompat.backends import DekiUserBackend, MindTouchAPIError
-from users.utils import (handle_login, handle_register, send_reminder_email,
-                         statsd_waffle_incr)
-
+from devmo.forms import newsletter_subscribe
 
 SESSION_VERIFIED_EMAIL = getattr(settings, 'BROWSERID_SESSION_VERIFIED_EMAIL',
                                  'browserid_verified_email')
@@ -56,17 +57,6 @@ def _verify_browserid(form, request):
     backend = browserid_auth.BrowserIDBackend()
     result = backend.verify(assertion, get_audience(request))
     return result
-
-
-def _redirect_with_mindtouch_login(next_url, username, password=None):
-    resp = HttpResponseRedirect(next_url)
-    if not settings.DEKIWIKI_ENDPOINT:
-        return resp
-    authtoken = DekiUserBackend.mindtouch_login(username, password,
-                                                force=True)
-    if authtoken:
-        resp.set_cookie('authtoken', authtoken)
-    return resp
 
 
 def _get_latest_user_with_email(email):
@@ -106,15 +96,23 @@ def browserid_change_email(request):
                                             args=[user.username, ]))
 
 
+@ssl_required
+def browserid_realm(request):
+    # serve the realm from the environment config
+    return HttpResponse(constance.config.BROWSERID_REALM_JSON,
+                        content_type='application/json')
+
+
 @csrf_exempt
 @ssl_required
 @require_POST
+@sensitive_post_parameters()
 def browserid_verify(request):
     """Process a submitted BrowserID assertion.
 
-    If valid, try to find either a Django or MindTouch user that matches the
-    verified email address. If neither is found, we bounce to a profile
-    creation page (ie. browserid_register)."""
+    If valid, try to find a Django user that matches the verified
+    email address. If not found, we bounce to a profile creation page
+    (ie. browserid_register)."""
     redirect_to = (_clean_next_url(request) or
             getattr(settings, 'LOGIN_REDIRECT_URL', reverse('home')))
     redirect_to_failure = (_clean_next_url(request) or
@@ -139,20 +137,13 @@ def browserid_verify(request):
 
     # Look for first most recently used Django account, use if found.
     user = _get_latest_user_with_email(email)
-    # If no Django account, look for a MindTouch account by email. But, only if
-    # there's a MindTouch API available. If found, auto-create the user.
-    if not user and settings.DEKIWIKI_ENDPOINT:
-        deki_user = DekiUserBackend.get_deki_user_by_email(email)
-        if deki_user:
-            user = DekiUserBackend.get_or_create_user(deki_user)
 
     # If we got a user from either the Django or MT paths, complete login for
     # Django and MT and redirect.
     if user:
         user.backend = 'django_browserid.auth.BrowserIDBackend'
         auth.login(request, user)
-        return set_browserid_explained(
-            _redirect_with_mindtouch_login(redirect_to, user.username))
+        return set_browserid_explained(HttpResponseRedirect(redirect_to))
 
     # Retain the verified email in a session, redirect to registration page.
     request.session[SESSION_VERIFIED_EMAIL] = email
@@ -162,9 +153,9 @@ def browserid_verify(request):
 
 
 @ssl_required
+@sensitive_post_parameters('password')
 def browserid_register(request):
     """Handle user creation when assertion is valid, but no existing user"""
-    statsd_waffle_incr('users.browserid_register', 'signin_metrics')
     redirect_to = request.session.get(SESSION_REDIRECT_TO,
         getattr(settings, 'LOGIN_REDIRECT_URL', reverse('home')))
     email = request.session.get(SESSION_VERIFIED_EMAIL, None)
@@ -174,63 +165,47 @@ def browserid_register(request):
         return HttpResponseRedirect(redirect_to)
 
     # Set up the initial forms
-    register_form = BrowserIDRegisterForm()
+    register_form = BrowserIDRegisterForm(request.locale)
     login_form = AuthenticationForm()
 
     if request.method == 'POST':
-        statsd_waffle_incr('users.browserid_register.POST', 'signin_metrics')
-
         # If the profile creation form was submitted...
         if 'register' == request.POST.get('action', None):
-            register_form = BrowserIDRegisterForm(request.POST)
+            register_form = BrowserIDRegisterForm(request.locale, request.POST)
             if register_form.is_valid():
-                try:
-                    # If the registration form is valid, then create a new
-                    # Django user, a new MindTouch user, and link the two
-                    # together.
-                    # TODO: This all belongs in model classes
-                    username = register_form.cleaned_data['username']
+                # If the registration form is valid, then create a new
+                # Django user.
+                # TODO: This all belongs in model classes
+                username = register_form.cleaned_data['username']
 
-                    user = User.objects.create(username=username, email=email)
-                    user.set_unusable_password()
-                    user.save()
+                user = User.objects.create(username=username, email=email)
+                user.set_unusable_password()
+                user.save()
 
-                    profile = UserProfile.objects.create(user=user)
-                    if settings.DEKIWIKI_ENDPOINT:
-                        deki_user = DekiUserBackend.post_mindtouch_user(user)
-                        profile.deki_user_id = deki_user.id
-                    profile.save()
+                profile = UserProfile.objects.create(user=user)
+                profile.save()
 
-                    user.backend = 'django_browserid.auth.BrowserIDBackend'
-                    auth.login(request, user)
+                user.backend = 'django_browserid.auth.BrowserIDBackend'
+                auth.login(request, user)
 
-                    # Bounce to the newly created profile page, since the user
-                    # might want to review & edit.
-                    statsd_waffle_incr('users.browserid_register.POST.SUCCESS',
-                                       'signin_metrics')
-                    redirect_to = request.session.get(SESSION_REDIRECT_TO,
-                                                    profile.get_absolute_url())
-                    return set_browserid_explained(
-                        _redirect_with_mindtouch_login(redirect_to,
-                                                       user.username))
-                except MindTouchAPIError:
-                    if user:
-                        user.delete()
-                    return jingo.render(request, '500.html',
-                                        {'error_message': "We couldn't "
-                                        "register a new account at this time. "
-                                        "Please try again later."})
+                newsletter_subscribe(request, email,
+                                     register_form.cleaned_data)
+                redirect_to = request.session.get(SESSION_REDIRECT_TO,
+                                                  profile.get_absolute_url())
+                return set_browserid_explained(HttpResponseRedirect(redirect_to))
 
     # HACK: Pretend the session was modified. Otherwise, the data disappears
     # for the next request.
     request.session.modified = True
 
-    return jingo.render(request, 'users/browserid_register.html',
+    return render(request, 'users/browserid_register.html',
                         {'login_form': login_form,
                          'register_form': register_form})
 
 
 @ssl_required
+@xframe_options_sameorigin
+@sensitive_post_parameters('password')
 def login(request):
     """Try to log the user in."""
     next_url = _clean_next_url(request)
@@ -243,14 +218,10 @@ def login(request):
 
     if form.is_valid() and request.user.is_authenticated():
         next_url = next_url or reverse('home')
-        return _redirect_with_mindtouch_login(next_url,
-            form.cleaned_data.get('username'),
-            form.cleaned_data.get('password'))
+        return HttpResponseRedirect(next_url)
 
-    response = jingo.render(request, 'users/login.html',
+    return render(request, 'users/login.html',
                             {'form': form, 'next_url': next_url})
-    response['x-frame-options'] = 'SAMEORIGIN'
-    return response
 
 
 @ssl_required
@@ -267,21 +238,14 @@ def logout(request):
 @ssl_required
 @logout_required
 @require_http_methods(['GET', 'POST'])
+@sensitive_post_parameters('password', 'password2')
 def register(request):
     """Register a new user."""
-    try:
-        form = handle_register(request)
-        if form.is_valid():
-            return jingo.render(request, 'users/register_done.html')
-        return jingo.render(request, 'users/register.html',
-                            {'form': form})
-    except MindTouchAPIError, e:
-        return jingo.render(request, '500.html',
-                            {'error_message': "We couldn't "
-                            "register a new account at this time. "
-                            "Please try again later."})
-    else:
-        raise e
+    form = handle_register(request)
+    if form.is_valid():
+        return render(request, 'users/register_done.html')
+    return render(request, 'users/register.html',
+                  {'form': form})
 
 
 def activate(request, activation_key):
@@ -297,9 +261,9 @@ def activate(request, activation_key):
         # my_questions = Question.uncached.filter(creator=account)
         # TODO: remove this after dropping unconfirmed questions.
         # my_questions.update(status=CONFIRMED)
-    return jingo.render(request, 'users/activate.html',
-                        {'account': account, 'questions': my_questions,
-                         'form': form})
+    return render(request, 'users/activate.html',
+                  {'account': account, 'questions': my_questions,
+                   'form': form})
 
 
 def resend_confirmation(request):
@@ -315,20 +279,16 @@ def resend_confirmation(request):
             except RegistrationProfile.DoesNotExist:
                 # Don't leak existence of email addresses.
                 pass
-            return jingo.render(request,
-                                'users/resend_confirmation_done.html',
-                                {'email': email})
+            return render(request, 'users/resend_confirmation_done.html',
+                          {'email': email})
     else:
         form = EmailConfirmationForm()
-    return jingo.render(request, 'users/resend_confirmation.html',
-                        {'form': form})
+    return render(request, 'users/resend_confirmation.html', {'form': form})
 
 
 def send_email_reminder(request):
     """Send reminder email."""
-    statsd_waffle_incr('users.send_email_reminder', 'signin_metrics')
     if request.method == 'POST':
-        statsd_waffle_incr('users.send_email_reminder.POST', 'signin_metrics')
         form = EmailReminderForm(request.POST)
         if form.is_valid():
             error = None
@@ -336,25 +296,17 @@ def send_email_reminder(request):
             try:
                 user = User.objects.get(username=username, is_active=True)
                 if user.email:
-                    # TODO: should this be on a model or manager instead?
-                    statsd_waffle_incr('users.send_email_reminder.SUCCESS',
-                                      'signin_metrics')
                     send_reminder_email(user)
                 else:
-                    statsd_waffle_incr('users.send_email_reminder.NOEMAIL',
-                                      'signin_metrics')
                     error = 'no_email'
             except User.DoesNotExist:
                 # Don't leak existence of email addresses.
-                statsd_waffle_incr('users.send_email_reminder.NOUSER',
-                                  'signin_metrics')
-            return jingo.render(request,
-                                'users/send_email_reminder_done.html',
-                                {'username': username, 'error': error})
+                pass
+            return render(request, 'users/send_email_reminder_done.html',
+                          {'username': username, 'error': error})
     else:
         form = EmailConfirmationForm()
-    return jingo.render(request, 'users/resend_confirmation.html',
-                        {'form': form})
+    return render(request, 'users/resend_confirmation.html', {'form': form})
 
 
 @login_required
@@ -372,14 +324,12 @@ def change_email(request):
                 user=request.user, email=form.cleaned_data['email'])
             EmailChange.objects.send_confirmation_email(
                 email_change, form.cleaned_data['email'])
-            return jingo.render(request,
-                                'users/change_email_done.html',
-                                {'email': form.cleaned_data['email']})
+            return render(request, 'users/change_email_done.html',
+                          {'email': form.cleaned_data['email']})
     else:
         form = EmailChangeForm(request.user,
                                initial={'email': request.user.email})
-    return jingo.render(request, 'users/change_email.html',
-                        {'form': form})
+    return render(request, 'users/change_email.html', {'form': form})
 
 
 @require_GET
@@ -398,21 +348,18 @@ def confirm_change_email(request, activation_key):
         # Update user's email.
         u.email = new_email
         u.save()
-        if settings.DEKIWIKI_ENDPOINT:
-            DekiUserBackend.put_mindtouch_user(u)
 
     # Delete the activation profile now, we don't need it anymore.
     email_change.delete()
 
-    return jingo.render(request, 'users/change_email_complete.html',
-                        {'old_email': old_email, 'new_email': new_email,
-                         'username': u.username, 'duplicate': duplicate})
+    return render(request, 'users/change_email_complete.html',
+                  {'old_email': old_email, 'new_email': new_email,
+                   'username': u.username, 'duplicate': duplicate})
 
 
 def profile(request, user_id):
     user_profile = get_object_or_404(UserProfile, user__id=user_id)
-    return jingo.render(request, 'users/profile.html',
-                        {'profile': user_profile})
+    return render(request, 'users/profile.html', {'profile': user_profile})
 
 
 @login_required
@@ -435,8 +382,8 @@ def edit_profile(request):
     else:  # request.method == 'GET'
         form = ProfileForm(instance=user_profile)
 
-    return jingo.render(request, 'users/edit_profile.html',
-                        {'form': form, 'profile': user_profile})
+    return render(request, 'users/edit_profile.html',
+                  {'form': form, 'profile': user_profile})
 
 
 @login_required
@@ -463,8 +410,6 @@ def edit_avatar(request):
                 os.unlink(old_avatar_path)
             user_profile = form.save()
 
-            content = _create_image_thumbnail(user_profile.avatar.path,
-                                              settings.AVATAR_SIZE)
             # Delete uploaded avatar and replace with thumbnail.
             name = user_profile.avatar.name
             user_profile.avatar.delete()
@@ -474,8 +419,8 @@ def edit_avatar(request):
     else:  # request.method == 'GET'
         form = AvatarForm(instance=user_profile)
 
-    return jingo.render(request, 'users/edit_avatar.html',
-                        {'form': form, 'profile': user_profile})
+    return render(request, 'users/edit_avatar.html',
+                  {'form': form, 'profile': user_profile})
 
 
 @login_required
@@ -496,10 +441,11 @@ def delete_avatar(request):
         return HttpResponseRedirect(reverse('users.edit_profile'))
     # else:  # request.method == 'GET'
 
-    return jingo.render(request, 'users/confirm_avatar_delete.html',
-                        {'profile': user_profile})
+    return render(request, 'users/confirm_avatar_delete.html',
+                  {'profile': user_profile})
 
 
+@sensitive_post_parameters()
 def password_reset(request):
     """Password reset form.
 
@@ -517,7 +463,7 @@ def password_reset(request):
     else:
         form = PasswordResetForm()
 
-    return jingo.render(request, 'users/pw_reset_form.html', {'form': form})
+    return render(request, 'users/pw_reset_form.html', {'form': form})
 
 
 def password_reset_sent(request):
@@ -527,10 +473,11 @@ def password_reset_sent(request):
     email is sent.
 
     """
-    return jingo.render(request, 'users/pw_reset_sent.html')
+    return render(request, 'users/pw_reset_sent.html')
 
 
 @ssl_required
+@sensitive_post_parameters()
 def password_reset_confirm(request, uidb36=None, token=None):
     """View that checks the hash in a password reset link and presents a
     form for entering a new password.
@@ -559,7 +506,7 @@ def password_reset_confirm(request, uidb36=None, token=None):
         context['validlink'] = False
         form = None
     context['form'] = form
-    return jingo.render(request, 'users/pw_reset_confirm.html', context)
+    return render(request, 'users/pw_reset_confirm.html', context)
 
 
 def password_reset_complete(request):
@@ -569,8 +516,7 @@ def password_reset_complete(request):
 
     """
     form = AuthenticationForm()
-    return jingo.render(request, 'users/pw_reset_complete.html',
-                        {'form': form})
+    return render(request, 'users/pw_reset_complete.html', {'form': form})
 
 
 @login_required
@@ -583,13 +529,13 @@ def password_change(request):
             return HttpResponseRedirect(reverse('users.pw_change_complete'))
     else:
         form = PasswordChangeForm(user=request.user)
-    return jingo.render(request, 'users/pw_change.html', {'form': form})
+    return render(request, 'users/pw_change.html', {'form': form})
 
 
 @login_required
 def password_change_complete(request):
     """Change password complete page."""
-    return jingo.render(request, 'users/pw_change_complete.html')
+    return render(request, 'users/pw_change_complete.html')
 
 
 def _clean_next_url(request):
@@ -600,33 +546,52 @@ def _clean_next_url(request):
     elif 'HTTP_REFERER' in request.META:
         url = request.META.get('HTTP_REFERER').decode('latin1', 'ignore')
     else:
-        url = None
+        return None
 
-    if url:
-        parsed_url = urlparse.urlparse(url)
-        # Don't redirect outside of site_domain.
-        # Don't include protocol+domain, so if we are https we stay that way.
-        if parsed_url.scheme:
-            site_domain = Site.objects.get_current().domain
-            url_domain = parsed_url.netloc
-            if site_domain != url_domain:
-                url = None
-            else:
-                url = u'?'.join([getattr(parsed_url, x) for x in
-                                ('path', 'query') if getattr(parsed_url, x)])
+    site = Site.objects.get_current()
+    if not is_safe_url(url, site.domain):
+        return None
+    parsed_url = urlparse.urlparse(url)
 
-        # Don't redirect right back to login, logout, register, or change email
-        # pages
-        locale, register_url = split_path(reverse('users.browserid_register'))
-        locale, change_email_url = split_path(
-                                        reverse('users.change_email'))
-        for looping_url in [settings.LOGIN_URL, settings.LOGOUT_URL,
-                            register_url, change_email_url]:
-            if looping_url in parsed_url.path:
-                url = None
+    # Don't redirect right back to login, logout, register, or
+    # change email pages
+    locale, register_url = split_path(reverse(
+        'users.browserid_register'))
+    locale, change_email_url = split_path(reverse(
+        'users.change_email'))
+    LOOPING_NEXT_URLS = [settings.LOGIN_URL, settings.LOGOUT_URL,
+                          register_url, change_email_url]
+    for looping_url in LOOPING_NEXT_URLS:
+        if looping_url in parsed_url.path:
+            return None
 
     # TODO?HACK: can't use urllib.quote_plus because mod_rewrite quotes the
     # next url value already.
-    if url:
-        url = url.replace(' ', '+')
+    url = url.replace(' ', '+')
     return url
+
+
+@permission_required('users.add_userban')
+def ban_user(request, user_id):
+    """
+    Ban a user.
+
+    """
+    try:
+        user = User.objects.get(pk=user_id)
+    except User.DoesNotExist:
+        raise Http404
+    if request.method == 'POST':
+        form = UserBanForm(data=request.POST)
+        if form.is_valid():
+            ban = UserBan(user=user,
+                          by=request.user,
+                          reason=form.cleaned_data['reason'],
+                          is_active=True)
+            ban.save()
+            return HttpResponseRedirect(user.get_absolute_url())
+    form = UserBanForm()
+    return render(request,
+                  'users/ban_user.html',
+                  {'form': form,
+                   'user': user})

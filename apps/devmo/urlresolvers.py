@@ -1,11 +1,19 @@
+from threading import currentThread
+
 from django.conf import settings
 from django.core.urlresolvers import reverse as django_reverse
-from django.utils.thread_support import currentThread
 from django.utils.translation.trans_real import parse_accept_lang_header
 
 
 # Thread-local storage for URL prefixes. Access with (get|set)_url_prefix.
 _prefixes = {}
+
+
+def get_best_language(accept_lang):
+    """Given an Accept-Language header, return the best-matching language."""
+
+    ranked = parse_accept_lang_header(accept_lang)
+    return find_supported(ranked)
 
 
 def set_url_prefix(prefix):
@@ -31,10 +39,19 @@ def reverse(viewname, urlconf=None, args=None, kwargs=None, prefix=None):
         return url
 
 
-def find_supported(test):
-    return [settings.LANGUAGE_URL_MAP[x] for
-            x in settings.LANGUAGE_URL_MAP if
-            x.split('-', 1)[0] == test.lower().split('-', 1)[0]]
+def find_supported(ranked):
+    """Given a ranked language list, return the best-matching locale."""
+    langs = dict(settings.LANGUAGE_URL_MAP)
+    for lang, _ in ranked:
+        lang = lang.lower()
+        if lang in langs:
+            return langs[lang]
+        # Add derived language tags to the end of the list as a fallback.
+        pre = '-'.join(lang.split('-')[0:-1])
+        if pre:
+            ranked.append((pre, None))
+    # Couldn't find any acceptable locale.
+    return False
 
 
 class Prefixer(object):
@@ -52,18 +69,16 @@ class Prefixer(object):
         """
         path = path_.lstrip('/')
 
-        # Use partitition instead of split since it always returns 3 parts
+        # Use partition instead of split since it always returns 3 parts
         first, _, rest = path.partition('/')
 
-        lang = first.lower()
-        if lang in settings.LANGUAGE_URL_MAP:
-            return settings.LANGUAGE_URL_MAP[lang], rest
+        # Treat locale as a single-item ranked list.
+        lang = find_supported([(first, 1.0)])
+
+        if lang:
+            return lang, rest
         else:
-            supported = find_supported(first)
-            if len(supported):
-                return supported[0], rest
-            else:
-                return '', path
+            return '', path
 
     def get_language(self):
         """
@@ -82,22 +97,10 @@ class Prefixer(object):
                 return settings.LANGUAGE_URL_MAP[lang]
 
         if self.request.META.get('HTTP_ACCEPT_LANGUAGE'):
-            ranked_languages = parse_accept_lang_header(
+            best = get_best_language(
                 self.request.META['HTTP_ACCEPT_LANGUAGE'])
-
-            # Do we support or remap their locale?
-            supported = [lang[0] for lang in ranked_languages if lang[0]
-                        in settings.LANGUAGE_URL_MAP]
-
-            # Do we support a less specific locale? (xx-YY -> xx)
-            if not len(supported):
-                for lang in ranked_languages:
-                    supported = find_supported(lang[0])
-                    if supported:
-                        break
-
-            if len(supported):
-                return settings.LANGUAGE_URL_MAP[supported[0].lower()]
+            if best:
+                return best
 
         return settings.LANGUAGE_CODE
 

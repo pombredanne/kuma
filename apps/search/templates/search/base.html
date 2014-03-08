@@ -6,6 +6,14 @@
   {% set styles = ('search',) %}
 {% endif %}
 {% if not scripts %}
-  {% set scripts = ('search', 'libs/jqueryui') %}
+  {% set scripts = ('search',) %}
 {% endif %}
 {% set hide_header_search = True %}
+
+{% block site_css %}
+    {{ super() }}
+{% endblock %}
+
+{% block site_js %}
+    {{ super() }}
+{% endblock %}

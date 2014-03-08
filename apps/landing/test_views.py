@@ -3,9 +3,13 @@ from nose.plugins.skip import SkipTest
 from mock import patch
 from pyquery import PyQuery as pq
 import test_utils
+
+import basket
+
+import constance.config
 from waffle.models import Switch
 
-from sumo.tests import LocalizingClient
+from devmo.tests import SkippedTestCase, LocalizingClient
 from sumo.urlresolvers import reverse
 
 
@@ -23,16 +27,6 @@ class LearnViewsTest(test_utils.TestCase):
         url = reverse('landing.views.learn_html')
         r = self.client.get(url, follow=True)
         eq_(200, r.status_code)
-        
-    def test_learn_html5(self):
-        url = reverse('landing.views.learn_html5')
-        r = self.client.get(url, follow=True)
-        eq_(404, r.status_code)
-        s = Switch.objects.create(name='html5_landing', active=True)
-        s.save()
-        r = self.client.get(url, follow=True)
-        eq_(200, r.status_code)
-        s.delete()
 
     def test_learn_css(self):
         url = reverse('landing.views.learn_css')
@@ -56,30 +50,6 @@ class LandingViewsTest(test_utils.TestCase):
         r = self.client.get(url, follow=True)
         eq_(200, r.status_code)
 
-        doc = pq(r.content)
-        dev_mdc_link = doc.find('a#dev-mdc-link')
-        ok_(dev_mdc_link)
-
-    def test_addons(self):
-        url = reverse('landing.views.addons')
-        r = self.client.get(url, follow=True)
-        eq_(200, r.status_code)
-
-    def test_mozilla(self):
-        url = reverse('landing.views.mozilla')
-        r = self.client.get(url, follow=True)
-        eq_(200, r.status_code)
-
-    def test_mobile(self):
-        url = reverse('landing.views.mobile')
-        r = self.client.get(url, follow=True)
-        eq_(200, r.status_code)
-
-    def test_web(self):
-        url = reverse('landing.views.web')
-        r = self.client.get(url, follow=True)
-        eq_(200, r.status_code)
-
     def test_search(self):
         raise SkipTest('Search test disabled until we switch to kuma wiki')
         url = reverse('landing.views.search')
@@ -92,68 +62,47 @@ class LandingViewsTest(test_utils.TestCase):
         eq_(200, r.status_code)
 
 
-class AppsViewsTest(test_utils.TestCase):
+class AppsViewsTest(SkippedTestCase):
 
     def setUp(self):
         self.client = LocalizingClient()
+        super(AppsViewsTest, self).setUp()
 
-    def test_apps_menu_item(self):
-        url = reverse('landing.views.home')
-        r = self.client.get(url)
-        eq_(200, r.status_code)
-        doc = pq(r.content)
-        nav_sub_topics = doc.find('ul#nav-sub-topics')
-        ok_(nav_sub_topics)
-        apps_item = nav_sub_topics.find('li#nav-sub-apps')
-        eq_('Apps', apps_item.text())
+    def _good_newsletter_post(self):
+        url = reverse('landing.views.apps_newsletter')
 
-    def test_apps(self):
-        url = reverse('landing.views.apps')
-        r = self.client.get(url, follow=True)
-        eq_(200, r.status_code)
-        doc = pq(r.content)
-        signup_form = doc.find('form.fm-subscribe')
-        eq_(reverse('apps_subscription', locale='en-US'),
-            signup_form.attr('action'))
-
-    @patch('landing.views.basket.subscribe')
-    def test_apps_subscription(self, subscribe):
-        subscribe.return_value = True
-        url = reverse('landing.views.apps_subscription')
         r = self.client.post(url,
                 {'format': 'html',
+                 'country': 'pt',
                  'email': 'testuser@test.com',
                  'agree': 'checked'},
             follow=True)
         eq_(200, r.status_code)
-        # assert thank you message
-        self.assertContains(r, 'Thank you')
-        eq_(1, subscribe.call_count)
+
+        return r
 
     @patch('landing.views.basket.subscribe')
-    def test_apps_subscription_ajax(self, subscribe):
-        subscribe.return_value = True
-        url = reverse('landing.views.apps_subscription')
-        r = self.client.post(url,
-                             {'format': 'html',
-                              'email': 'testuser@test.com',
-                              'agree': 'checked'},
-                             HTTP_X_REQUESTED_WITH='XMLHttpRequest')
-        eq_(200, r.status_code)
+    def test_apps_subscription(self, subscribe):
+        subscribe.return_value = {'status': 'success'}
+        r = self._good_newsletter_post()
         # assert thank you message
         self.assertContains(r, 'Thank you')
-        self.assertNotContains(r, '<html')
-        self.assertNotContains(r, '<head>')
-        self.assertNotContains(r, '<title>')
         eq_(1, subscribe.call_count)
 
     @patch('landing.views.basket.subscribe')
     def test_apps_subscription_bad_values(self, subscribe):
         subscribe.return_value = True
-        url = reverse('landing.views.apps_subscription')
+        url = reverse('landing.views.apps_newsletter')
         r = self.client.post(url, {'format': 1, 'email': 'nope'})
         eq_(200, r.status_code)
         # assert error
         self.assertContains(r, 'Enter a valid e-mail address.')
         self.assertContains(r, 'Select a valid choice.')
         self.assertContains(r, 'You must agree to the privacy policy.')
+
+    @patch('landing.views.basket.subscribe')
+    def test_apps_subscription_exception_retry(self, subscribe):
+        subscribe.side_effect = basket.base.BasketException("500!")
+        subscribe.return_value = True
+        self._good_newsletter_post()
+        eq_(constance.config.BASKET_RETRIES, subscribe.call_count)

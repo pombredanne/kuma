@@ -10,8 +10,8 @@ behavior--and new code should come with tests.
 Running the Test Suite
 ======================
 
-If you followed the steps in `the installation docs <installation.rst>`_, then
-all you should need to do to run the test suite is::
+If you followed the steps in :doc:`the installation docs <installation>`,
+then all you should need to do to run the test suite is::
 
     ./manage.py test
 
@@ -46,7 +46,7 @@ like::
 
 You can also exclude tests that match a regular expression with ``-e``::
 
-    ./manage.py test -e"sphinx"
+    ./manage.py test -e "search"
 
 See the output of ``./manage.py test --help`` for more arguments.
 

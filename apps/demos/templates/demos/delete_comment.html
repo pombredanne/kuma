@@ -5,7 +5,7 @@
     {% extends "demos/base_popup.html" %}
 {% endif %}
 
-{% block pageid %}{% endblock %}
+{% block body_attributes %}{% endblock %}
 {% block bodyclass %}section-demos{% endblock %}
 {% block title %}{{ page_title(_('{subtitle} | Demo Studio') | f(subtitle=_('Delete Comment'))) }}{% endblock %}
 
@@ -52,7 +52,6 @@
 
             {% trans %}
               <button type="submit" class="remove"><span>Delete comment</span></button>
-              or  <a class="closeModal" href="{{ next }}">Cancel</a>
             {% endtrans %}
 
 

@@ -6,17 +6,16 @@ from django.contrib.auth import authenticate, forms as auth_forms
 from django.contrib.auth.models import User
 
 from tower import ugettext as _, ugettext_lazy as _lazy
+from product_details import product_details
 
-from dekicompat.backends import DekiUserBackend
+from devmo.forms import PRIVACY_REQUIRED
 from sumo.widgets import ImageWidget
-from upload.forms import clean_image_extension
-from upload.utils import check_file_size, FileTooLargeError
 from users.models import Profile
 from users.widgets import FacebookURLWidget, TwitterURLWidget
 
 
 USERNAME_INVALID = _lazy(u'Username may contain only letters, '
-                         'numbers and @/./+/-/_ characters.')
+                         'numbers and ./-/_ characters.')
 USERNAME_REQUIRED = _lazy(u'Username is required.')
 USERNAME_SHORT = _lazy(u'Username is too short (%(show_value)s characters). '
                        'It must be at least %(limit_value)s characters.')
@@ -37,9 +36,10 @@ class UsernameField(forms.RegexField):
     def __init__(self, *args, **kwargs):
         super(UsernameField, self).__init__(
             label=_lazy(u'Username'), max_length=30, min_length=3,
-            regex=r'^[\w.@+-]+$',
+            regex=r'^[\w.-]+$',
             help_text=_lazy(u'Required. 30 characters or fewer. '
-                            'Letters, digits and @/./+/-/_ only.'),
+                            'Letters, digits and ./-/_ only.'),
+            widget=forms.TextInput(),
             error_messages={'invalid': USERNAME_INVALID,
                             'required': USERNAME_REQUIRED,
                             'min_length': USERNAME_SHORT,
@@ -94,13 +94,9 @@ class RegisterForm(forms.ModelForm):
 
     def clean_username(self):
         username = self.cleaned_data.get('username')
-        if settings.DEKIWIKI_ENDPOINT:
-            # Check deki for existing user (it needs = in front of name), but
-            # only if the API is available.
-            deki_user = DekiUserBackend.get_deki_user('=' + username)
-            if deki_user is not None:
-                raise forms.ValidationError(
-                    _('The username you entered already exists.'))
+        if User.objects.filter(username=username).exists():
+            raise forms.ValidationError(
+                _('The username you entered already exists.'))
         return username
 
     def __init__(self,  request=None, *args, **kwargs):
@@ -114,25 +110,51 @@ class BrowserIDRegisterForm(forms.ModelForm):
 
     username = UsernameField()
 
+    newsletter = forms.BooleanField(label=_('Send me the newsletter'),
+                                    required=False)
+
+    # Newsletter fields copied from SubscriptionForm
+    formatChoices = [('html', 'HTML'), ('text', 'Plain text')]
+    format = forms.ChoiceField(
+        label=_(u'Preferred format'),
+        choices=formatChoices,
+        initial=formatChoices[0],
+        widget=forms.RadioSelect()
+    )
+    agree = forms.BooleanField(
+        label=_(u'I agree'),
+        error_messages={'required': PRIVACY_REQUIRED},
+        required=False
+    )
+
     class Meta(object):
         model = User
         fields = ('username',)
 
     def clean_username(self):
         username = self.cleaned_data.get('username')
-        if settings.DEKIWIKI_ENDPOINT:
-            # Check deki for existing user (it needs = in front of name), but
-            # only if the API is available.
-            deki_user = DekiUserBackend.get_deki_user('=' + username)
-            if deki_user is not None:
-                raise forms.ValidationError(_('The username you entered'
-                                              ' already exists.'))
+        if User.objects.filter(username=username).exists():
+            raise forms.ValidationError(_('The username you entered'
+                                          ' already exists.'))
         return username
 
-    def __init__(self,  request=None, *args, **kwargs):
-        super(BrowserIDRegisterForm, self).__init__(request,
-                                                    auto_id='id_for_%s',
-                                                    *args, **kwargs)
+    def __init__(self, locale, request=None, *args, **kwargs):
+        regions = product_details.get_regions(locale)
+        regions = sorted(regions.iteritems(), key=lambda x: x[1])
+        self.locale = locale
+
+        lang = country = locale.lower()
+        if '-' in lang:
+            lang, country = lang.split('-', 1)
+        super(BrowserIDRegisterForm, self).__init__(request, *args, **kwargs)
+
+        # Newsletter field copied from SubscriptionForm
+        self.fields['country'] = forms.ChoiceField(
+            label=_(u'Your country'),
+            choices=regions,
+            initial=country,
+            required=False
+        )
 
 
 class AuthenticationForm(auth_forms.AuthenticationForm):
@@ -175,29 +197,6 @@ class AuthenticationForm(auth_forms.AuthenticationForm):
         return self.cleaned_data
 
 
-class PasswordResetForm(auth_forms.PasswordResetForm):
-    """Overrides the default django form.
-    * Checks mindtouch for an email address
-    * Creates django user & profile if needed
-    """
-    def clean_email(self):
-        try:
-            return super(PasswordResetForm, self).clean_email()
-        except forms.ValidationError as e:
-            if not settings.DEKIWIKI_ENDPOINT:
-                # Skip MindTouch API, if unavailable.
-                raise e
-            email = self.cleaned_data["email"]
-            deki_user = DekiUserBackend.get_deki_user_by_email(email)
-            if deki_user is None:
-                raise e
-            else:
-                user = DekiUserBackend.get_or_create_user(deki_user)
-                self.users_cache = User.objects.filter(email__iexact=email)
-                return user.email
-            raise e
-
-
 class ProfileForm(forms.ModelForm):
     """The form for editing the user's profile."""
 
@@ -236,17 +235,6 @@ class AvatarForm(forms.ModelForm):
         model = Profile
         fields = ('avatar',)
 
-    def clean_avatar(self):
-        if not ('avatar' in self.cleaned_data and self.cleaned_data['avatar']):
-            return self.cleaned_data['avatar']
-        try:
-            check_file_size(self.cleaned_data['avatar'],
-                            settings.MAX_AVATAR_FILE_SIZE)
-        except FileTooLargeError as e:
-            raise forms.ValidationError(e.args[0])
-        clean_image_extension(self.cleaned_data.get('avatar'))
-        return self.cleaned_data['avatar']
-
 
 class EmailConfirmationForm(forms.Form):
     """A simple form that requires an email address."""
@@ -275,3 +263,7 @@ class EmailChangeForm(forms.Form):
             raise forms.ValidationError(_('A user with that email address '
                                           'already exists.'))
         return self.cleaned_data['email']
+
+
+class UserBanForm(forms.Form):
+    reason = forms.CharField(widget=forms.Textarea)

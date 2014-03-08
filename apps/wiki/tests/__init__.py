@@ -2,13 +2,15 @@ from datetime import datetime
 import time
 
 from django.contrib.auth.models import User, Group, Permission
+from django.core.files import temp as tempfile
 from django.template.defaultfilters import slugify
 
 from html5lib.filters._base import Filter as html5lib_Filter
 from nose.tools import nottest
 from waffle.models import Flag
 
-from sumo.tests import LocalizingClient, TestCase, get_user
+from devmo.tests import LocalizingClient
+from sumo.tests import TestCase, get_user
 import wiki.content
 from wiki.models import Document, Revision, CATEGORIES, SIGNIFICANCES
 
@@ -20,8 +22,10 @@ class TestCaseBase(TestCase):
         super(TestCaseBase, self).setUp()
         self.client = LocalizingClient()
 
-        self.kumaediting_flag = Flag.objects.create(name='kumaediting',
-                                                   everyone=True)
+        ke_flag, created = Flag.objects.get_or_create(name='kumaediting')
+        ke_flag.everyone = True
+        ke_flag.save()
+        self.kumaediting_flag = ke_flag
 
     def tearDown(self):
         self.kumaediting_flag.delete()
@@ -35,7 +39,8 @@ class TestCaseBase(TestCase):
 def document(save=False, **kwargs):
     """Return an empty document with enough stuff filled out that it can be
     saved."""
-    defaults = {'category': CATEGORIES[0][0], 'title': str(datetime.now())}
+    defaults = {'category': CATEGORIES[0][0], 'title': str(datetime.now()),
+                'is_redirect': 0}
     defaults.update(kwargs)
     if 'slug' not in kwargs:
         defaults['slug'] = slugify(defaults['title'])
@@ -58,11 +63,13 @@ def revision(save=False, **kwargs):
     if 'document' not in kwargs:
         d = document()
         d.save()
+    else:
+        d = kwargs['document']
 
     defaults = {'summary': 'Some summary', 'content': 'Some content',
                 'significance': SIGNIFICANCES[0][0], 'comment': 'Some comment',
                 'creator': kwargs.get('creator', get_user()), 'document': d,
-                'tags': '"some", "tags"'}
+                'tags': '"some", "tags"', 'toc_depth': 1}
 
     defaults.update(kwargs)
 
@@ -128,7 +135,7 @@ def new_document_data(tags=None):
         'keywords': 'key1, key2',
         'summary': 'lipsum',
         'content': 'lorem ipsum dolor sit amet',
-        'show_toc': 'true',
+        'toc_depth': 1,
     }
 
 
@@ -198,10 +205,21 @@ def create_topical_parents_docs():
     return d1, d2
 
 
+def make_test_file(content=None):
+    if content == None:
+        content = 'I am a test file for upload.'
+    # Shamelessly stolen from Django's own file-upload tests.
+    tdir = tempfile.gettempdir()
+    file_for_upload = tempfile.NamedTemporaryFile(suffix=".txt", dir=tdir)
+    file_for_upload.write(content)
+    file_for_upload.seek(0)
+    return file_for_upload
+
+
 class FakeResponse:
     """Quick and dirty mocking stand-in for a response object"""
     def __init__(self, **entries):
         self.__dict__.update(entries)
 
     def read(self):
-        return self.body
+        return self.text

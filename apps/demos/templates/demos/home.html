@@ -1,6 +1,6 @@
 {% extends "demos/base.html" %}
 
-{% block pageid %}demostudio{% endblock %}
+{% block body_attributes %}id="demostudio"{% endblock %}
 
 {% block bodyclass %}section-demos landing{% endblock %}
 
@@ -20,7 +20,7 @@
   <header id="demos-head">
     <h1>{{_("Mozilla Demo Studio")}}</h1>
     <ul class="demo-buttons">
-      <li class="submit"><a href="{{ url('demos_submit') }}" class="button"><b></b>{{_("Submit a Demo")}}</a></li>
+      <li class="submit"><a href="{{ url('demos_submit') }}" class="button positive"><b></b>{{_("Submit a Demo")}}</a></li>
       <li class="learnmore menu"><a href="#learn-pop" class="button">{{ _('Learn More') }}</a>
         <div id="learn-pop" aria-hidden="true">        
           {% trans %}
@@ -114,7 +114,7 @@
       {% trans %}<b>or</b>{% endtrans %}
       
       <div id="demo-tags" class="menu">
-        <a href="#tags-list" class="button">{{_("Browse by Technology")}}</a>
+        <a href="#tags-list" class="button neutral">{{_("Browse by Technology")}}</a>
         <ul id="tags-list">
             {% for tag in tags_used_for_submissions() %}
                 {% if tag.name.startswith('tech:') %}
@@ -182,7 +182,7 @@
      * and does DOM juggling to page through the items.
      */
     var featured_demos_feed_url =
-        '{{ request.build_absolute_uri(url('demos_feed_featured', format='json')) }}';
+        '{{ url('demos_feed_featured', format='json') }}';
 
     // Hide buttons until feed loaded.
     $(".nav-slide .next, .nav-slide .prev").hide(); 

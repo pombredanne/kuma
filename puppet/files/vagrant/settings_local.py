@@ -16,13 +16,9 @@ DEMO_UPLOADS_URL = '/media/uploads/demos/'
 PROD_DETAILS_DIR = '/home/vagrant/product_details_json'
 MDC_PAGES_DIR    = '/home/vagrant/mdc_pages'
 
-DEKIWIKI_ENDPOINT = False # "http://localhost"
-DEKIWIKI_APIKEY = "GFxaNVK37fLPsFEYM7NwdIuNpGIiFTOX"
-DEKIWIKI_MOCK = True
-
 GOOGLE_MAPS_API_KEY = "ABQIAAAANRj9BHQi5ireVluCwVy0yRSrufPN8BjQWjkoRva24PCQEXS2OhSXu2BEgUH5PmGOmW71r2-tEuOVuQ"
 
-RECAPTCHA_USE_SSL = False
+RECAPTCHA_USE_SSL = True
 RECAPTCHA_PUBLIC_KEY = '6LdX8cISAAAAAA9HRXmzrcRSFsUoIK9u0nWpvGS_'
 RECAPTCHA_PRIVATE_KEY = '6LdX8cISAAAAACkC1kqYmpeSf-1geTmLzrLnq0t6'
 
@@ -42,26 +38,26 @@ INSTALLED_APPS = INSTALLED_APPS + (
     "devserver",
 )
 
-MIDDLEWARE_CLASSES = (
-    "debug_toolbar.middleware.DebugToolbarMiddleware",
-) + MIDDLEWARE_CLASSES
+JINGO_EXCLUDE_APPS = JINGO_EXCLUDE_APPS + (
+    'debug_toolbar',
+)
 
 DEBUG_TOOLBAR_CONFIG = {
     "INTERCEPT_REDIRECTS": False,
 }
 
 DEBUG_TOOLBAR_PANELS = (
-    'debug_toolbar.panels.version.VersionDebugPanel',
-    'debug_toolbar.panels.timer.TimerDebugPanel',
-    'debug_toolbar.panels.settings_vars.SettingsVarsDebugPanel',
-    'debug_toolbar.panels.headers.HeaderDebugPanel',
-    'debug_toolbar.panels.request_vars.RequestVarsDebugPanel',
-    'debug_toolbar.panels.template.TemplateDebugPanel',
-    #'cache_panel.CachePanel',
-    'debug_toolbar.panels.sql.SQLDebugPanel',
-    'debug_toolbar.panels.signals.SignalDebugPanel',
-    'debug_toolbar.panels.logger.LoggingPanel',
-    'django_statsd.panel.StatsdPanel',
+    'debug_toolbar.panels.versions.VersionsPanel',
+    'debug_toolbar.panels.timer.TimerPanel',
+    'debug_toolbar.panels.settings.SettingsPanel',
+    'debug_toolbar.panels.headers.HeadersPanel',
+    'debug_toolbar.panels.request.RequestPanel',
+    'debug_toolbar.panels.templates.TemplatesPanel',
+    'debug_toolbar.panels.cache.CachePanel',
+    'debug_toolbar.panels.sql.SQLPanel',
+    'debug_toolbar.panels.signals.SignalsPanel',
+    'debug_toolbar.panels.logging.LoggingPanel',
+    'debug_toolbar.panels.redirects.RedirectsPanel',
 )
 
 DEVSERVER_MODULES = (
@@ -99,6 +95,31 @@ MIGRATION_DATABASES = {
     },
 }
 
+CACHES = {
+    'default': {
+        # HACK: We currently have 'default' memcache disabled in production.
+        # This reflects that in local dev.
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        #'BACKEND': 'django.core.cache.backends.memcached.MemcachedCache',
+        #'LOCATION': [
+        #    '127.0.0.1:11211',
+        #],
+        'TIMEOUT': 3600,
+        'KEY_PREFIX': 'kuma',
+    },
+    'secondary': {
+        'BACKEND': 'django.core.cache.backends.memcached.MemcachedCache',
+        'LOCATION': [
+            '127.0.0.1:11211',
+        ],
+        'TIMEOUT': 3600,
+        'KEY_PREFIX': 'kuma',
+    }
+}
+
+# TODO: Switch this to 'default' when main cache issues are resolved
+SECONDARY_CACHE_ALIAS = 'secondary'
+
 # Use IP:PORT pairs separated by semicolons.
 CACHE_BACKEND = 'memcached://localhost:11211?timeout=60'
 CONSTANCE_DATABASE_CACHE_BACKEND = CACHE_BACKEND
@@ -109,15 +130,6 @@ SECRET_KEY = 'jenny8675309'
 DEBUG_PROPAGATE_EXCEPTIONS = DEBUG
 
 LOG_LEVEL = logging.DEBUG
-logging.basicConfig(
-    level = logging.DEBUG,
-    format = '%(asctime)s %(levelname)s %(message)s',
-    # filename = '/home/vagrant/logs/kuma-django.log',
-)
-
-SPHINX_INDEXER = '/usr/local/bin/indexer'
-SPHINX_SEARCHD = '/usr/local/bin/searchd'
-SEARCH_CACHE_PERIOD = 0 
 
 SITE_URL = 'https://developer-local.allizom.org'
 PROTOCOL = 'https://'
@@ -132,4 +144,19 @@ LOGIN_REDIRECT_URL_FAILURE = '/'
 
 KUMASCRIPT_URL_TEMPLATE = 'http://localhost:9080/docs/{path}'
 
-STATSD_CLIENT = 'django_statsd.clients.toolbar'
+ATTACHMENT_HOST = 'mdn-local.mozillademos.org'
+
+ES_DISABLED = False
+ES_URLS = ['http://127.0.0.1:9200']
+ES_INDEXES = {'default': 'main_index'}
+ES_INDEX_PREFIX = 'mdn'
+ES_LIVE_INDEX = True
+ES_INDEXING_TIMEOUT = 30
+
+# See https://mana.mozilla.org/wiki/display/websites/Developer+Cluster#DeveloperCluster-Sentry
+SENTRY_DSN = ''
+
+if SENTRY_DSN:
+    INSTALLED_APPS = INSTALLED_APPS + (
+        'raven.contrib.django.raven_compat',
+    )

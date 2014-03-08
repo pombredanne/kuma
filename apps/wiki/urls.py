@@ -1,37 +1,11 @@
-from django.conf.urls.defaults import patterns, url, include
+from django.conf.urls import include, patterns, url
+from django.views.generic import TemplateView
 
-from kbforums.feeds import ThreadsFeed, PostsFeed
 from sumo.views import redirect_to
 from wiki.feeds import (DocumentsRecentFeed, DocumentsReviewFeed, RevisionsFeed,
                         AttachmentsFeed,
                         DocumentsUpdatedTranslationParentFeed,)
 
-
-# These patterns inherit from /discuss
-discuss_patterns = patterns('kbforums.views',
-    url(r'^$', 'threads', name='wiki.discuss.threads'),
-    url(r'^/feed', ThreadsFeed(), name='wiki.discuss.threads.feed'),
-    url(r'^/new', 'new_thread', name='wiki.discuss.new_thread'),
-    url(r'^/watch', 'watch_forum', name='wiki.discuss.watch_forum'),
-    url(r'^/(?P<thread_id>\d+)$', 'posts', name='wiki.discuss.posts'),
-    url(r'^/(?P<thread_id>\d+)/feed$', PostsFeed(),
-        name='wiki.discuss.posts.feed'),
-    url(r'^/(?P<thread_id>\d+)/watch$', 'watch_thread',
-        name='wiki.discuss.watch_thread'),
-    url(r'^/(?P<thread_id>\d+)/reply$', 'reply', name='wiki.discuss.reply'),
-    url(r'^/(?P<thread_id>\d+)/sticky$', 'sticky_thread',
-        name='wiki.discuss.sticky_thread'),
-    url(r'^/(?P<thread_id>\d+)/lock$', 'lock_thread',
-        name='wiki.discuss.lock_thread'),
-    url(r'^/(?P<thread_id>\d+)/edit$', 'edit_thread',
-        name='wiki.discuss.edit_thread'),
-    url(r'^/(?P<thread_id>\d+)/delete$', 'delete_thread',
-        name='wiki.discuss.delete_thread'),
-    url(r'^/(?P<thread_id>\d+)/(?P<post_id>\d+)/edit', 'edit_post',
-        name='wiki.discuss.edit_post'),
-    url(r'^/(?P<thread_id>\d+)/(?P<post_id>\d+)/delete', 'delete_post',
-        name='wiki.discuss.delete_post'),
-)
 
 # These patterns inherit (?P<document_path>[^\$]+).
 document_patterns = patterns('wiki.views',
@@ -45,12 +19,29 @@ document_patterns = patterns('wiki.views',
     url(r'^\$review/(?P<revision_id>\d+)$', 'review_revision',
         name='wiki.review_revision'),
     url(r'^\$compare$', 'compare_revisions', name='wiki.compare_revisions'),
+    url(r'^\$children$', 'get_children', name='wiki.get_children'),
     url(r'^\$translate$', 'translate', name='wiki.translate'),
     url(r'^\$locales$', 'select_locale', name='wiki.select_locale'),
     url(r'^\$json$', 'json_view', name='wiki.json_slug'),
+    url(r'^\$styles$', 'styles_view', name='wiki.styles'),
+    url(r'^\$toc$', 'toc_view', name='wiki.toc'),
+    url(r'^\$move$', 'move', name='wiki.move'),
+    url(r'^\$quick-review$', 'quick_review', name='wiki.quick_review'),
     url(r'^\$samples/(?P<sample_id>.+)$', 'code_sample', name='wiki.code_sample'),
     url(r'^\$revert/(?P<revision_id>\d+)$', 'revert_document',
         name='wiki.revert_document'),
+    url(r'^\$repair_breadcrumbs$',
+        'repair_breadcrumbs',
+        name='wiki.repair_breadcrumbs'),
+    url(r'^\$delete$',
+        'delete_document',
+        name='wiki.delete_document'),
+    url(r'^\$restore$',
+        'restore_document',
+        name='wiki.restore_document'),
+    url(r'^\$purge$',
+        'purge_document',
+        name='wiki.purge_document'),
 
     # Un/Subscribe to document edit notifications.
     url(r'^\$watch$', 'watch_document', name='wiki.document_watch'),
@@ -58,16 +49,9 @@ document_patterns = patterns('wiki.views',
 
     # Vote helpful/not helpful
     url(r'^\$vote', 'helpful_vote', name="wiki.document_vote"),
-
-    # KB discussion forums
-    (r'^\$discuss', include(discuss_patterns)),
 )
 
-urlpatterns = patterns('docs.views',
-    url(r'^/?$', 'docs', name='docs'),
-)
-
-urlpatterns += patterns('wiki.views',
+urlpatterns = patterns('wiki.views',
     # Un/Subscribe to locale 'ready for review' notifications.
     url(r'^/ckeditor_config.js$', 'ckeditor_config',
         name='wiki.ckeditor_config'),
@@ -85,11 +69,19 @@ urlpatterns += patterns('wiki.views',
     url(r'^.json$', 'json_view', name='wiki.json'),
 
     url(r'^/templates$', 'list_templates', name='wiki.list_templates'),
+    url(r'^/files$', 'list_files', name='wiki.list_files'),
+    url(r'^/tags$', 'list_tags', name='wiki.list_tags'),
     url(r'^/new$', 'new_document', name='wiki.new_document'),
     url(r'^/all$', 'list_documents', name='wiki.all_documents'),
     url(r'^/preview-wiki-content$', 'preview_revision', name='wiki.preview'),
+    url(r'^/with-errors$', 'list_documents_with_errors', name='wiki.errors'),
+
+    url(r'^/move-requested$',
+        TemplateView.as_view(template_name='wiki/move_requested.html'),
+        name='wiki.move_requested'),
     
     url(r'^/get-documents$', 'autosuggest_documents', name='wiki.autosuggest_documents'),
+    url(r'^/external-signup$', 'external_signup', name='wiki.external_signup'),
     
     url(r'^/category/(?P<category>\d+)$', 'list_documents',
         name='wiki.category'),

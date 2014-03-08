@@ -1,13 +1,15 @@
 {% extends "demos/base.html" %}
 
-{% block pageid %}devderby{% endblock %}
+{% block body_attributes %}id="devderby"{% endblock %}
 
-{% block bodyclass %}section-demos devderby landing{% endblock %}
+{% block bodyclass %}section-demos devderby landing {% if waffle.flag('derby_closed') %}derby-closed{% endif %}{% endblock %}
 
 {% block extrahead %}
     {{ css('devderby') }}
+    {% if not waffle.flag('derby_closed') %}
     <link rel="alternate" type="application/atom+xml" title="{{_('Dev Derby Submissions')}}"
         href="{{ url('demos_feed_tag', tag=current_challenge_tag_name, format='atom') }}" />
+    {% endif %}
 {% endblock %}
 
 {% block title %}{{ page_title(_('Dev Derby')) }}{% endblock %}
@@ -35,40 +37,62 @@
     <header id="derby-head">
       <p class="presents"><a href="{{ url('demos') }}">{{_("Mozilla Demo Studio")}}</a> {{_("presents")}}</p>
       <h1><a href="{{url('demos_devderby_landing')}}">{{_("Dev Derby")}}</a></h1>
-      <h2>{% trans title=tag_meta(current_challenge_tag_name, "short_title") %}Show us what you can do with {{ title }}{% endtrans %}</h2>
-      <p class="info">{{_("Join the Dev Derby now and submit your demo to win an Android phone or other prizes.")}}</p>
-      <p class="submit">{% trans %}<a href="{{ submit_url }}"><b>Submit</b> Your Demo</a>{% endtrans %}</p>
-    </header>
 
-  <div class="main">
+      {% if not waffle.flag('derby_closed') %}
+        <h2>{% trans title=tag_meta(current_challenge_tag_name, "short_title") %}Show us what you can do with {{ title }}{% endtrans %}</h2>
+        <p class="info">{{_("Join the Dev Derby now and submit your demo to win an Android phone or other prizes.")}}</p>
+        <p class="submit">{% trans %}<a href="{{ submit_url }}"><b>Submit</b> Your Demo</a>{% endtrans %}</p>
+      {% else %}
+        <h2>{{ _('Dev Derby on Hiatus') }}</h2>
+        <p>{{ _('The Dev Derby is on hiatus, but will return soon.') }}</p>
+      {% endif %}
+    </header>
+    
+    <div class="column-container">
+  <div class="column-main main">
     <section id="upcoming">
       <header>
+        {% if not waffle.flag('derby_closed') %}
         <h1>{{_("Upcoming Challenges")}}</h1>
+        {% else %}
+        <h1>{{_("Recent Challenges")}}</h1>
+        {% endif %}
       </header>
       <ol>
         <li class="first">
-          <h2 class="title">{{tag_meta(current_challenge_tag_name, "short_title")}}</h2>
-          <h3 class="date">{{tag_meta(current_challenge_tag_name, "short_dateline")}}</h3>
-          <h4 class="tagline">{{tag_meta(current_challenge_tag_name, "tagline")}}</h4>
-          <h5 class="current">{% trans %}<span><b>Current</b> Derby</span>{% endtrans %}</h5>
-          <p class="desc">{{tag_meta(current_challenge_tag_name, "summary")}}</p>
+          {% if not waffle.flag('derby_closed') %}
+            <h2 class="title">{{tag_meta(current_challenge_tag_name, "short_title")}}</h2>
+            <h3 class="date">{{tag_meta(current_challenge_tag_name, "short_dateline")}}</h3>
+            <h4 class="tagline">{{tag_meta(current_challenge_tag_name, "tagline")}}</h4>
+            <h5 class="current">{% trans %}<span><b>Current</b> Derby</span>{% endtrans %}</h5>
+            <p class="desc">{{tag_meta(current_challenge_tag_name, "summary")}}</p>
+          {% else %}
+            <h2 class="title"><a href="{{ devderby_tag_to_date_url("challenge:2013:july") }}">{{tag_meta("challenge:2013:july", "short_title")}}</a></h2>
+            <h3 class="date">{{tag_meta("challenge:2013:july", "short_dateline")}}</h3>
+            <h4 class="tagline"><a href="{{ devderby_tag_to_date_url("challenge:2013:july") }}">{{tag_meta("challenge:2013:july", "tagline")}}</a></h4>
+            {% if not waffle.flag('derby_closed') %}
+            <h5 class="current">{% trans %}<span><b>Current</b> Derby</span>{% endtrans %}</h5>
+            {% endif %}
+            <p class="desc">{{tag_meta("challenge:2013:july", "summary")}}</p>
+          {% endif %}
         </li>
         <li class="second">
-          <h2 class="title">{{tag_meta(challenge_choices[1], "short_title")}}</h2>
-          <h3 class="date">{{tag_meta(challenge_choices[1], "short_dateline")}}</h3>
-          <h4 class="tagline">{{tag_meta(challenge_choices[1], "tagline")}}</h4>
-          <p class="desc">{{tag_meta(challenge_choices[1], "summary")}}</p>
+          <h2 class="title"><a href="{{ devderby_tag_to_date_url("challenge:2013:may") }}">{{tag_meta("challenge:2013:may", "short_title")}}</a></h2>
+          <h3 class="date">{{tag_meta("challenge:2013:may", "short_dateline")}}</h3>
+          <h4 class="tagline"><a href="{{ devderby_tag_to_date_url("challenge:2013:may") }}">{{tag_meta("challenge:2013:may", "tagline")}}</a></h4>
+          <p class="desc">{{tag_meta("challenge:2013:may", "summary")}}</p>
         </li>
         <li class="third">
-          <h2 class="title">{{tag_meta(challenge_choices[2], "short_title")}}</h2>
-          <h3 class="date">{{tag_meta(challenge_choices[2], "short_dateline")}}</h3>
-          <h4 class="tagline">{{tag_meta(challenge_choices[2], "tagline")}}</h4>
-          <p class="desc">{{tag_meta(challenge_choices[2], "summary")}}</p>
+          <h2 class="title"><a href="{{ devderby_tag_to_date_url("challenge:2013:june") }}">{{tag_meta("challenge:2013:june", "short_title")}}</a></h2>
+          <h3 class="date">{{tag_meta("challenge:2013:june", "short_dateline")}}</h3>
+          <h4 class="tagline"><a href="{{ devderby_tag_to_date_url("challenge:2013:june") }}">{{tag_meta("challenge:2013:june", "tagline")}}</a></h4>
+          <p class="desc">{{tag_meta("challenge:2013:june", "summary")}}</p>
         </li>
       </ol>
     </section>
     
     <section id="current-challenge">
+      {% if not waffle.flag('derby_closed') %}
       <ul class="tabs">
         <li class="current"><a href="#tab-challenge">{{_("Current")}}</a></li>
         <li><a href="#tab-submissions">{{_("Submissions")}}</a></li>
@@ -147,45 +171,32 @@
         <h2>{{ _("Expert Judges") }}</h2>
         <ul class="judges">
           <li class="vcard">
-            <h3><a href="http://davidwalsh.name/" class="fn url">David Walsh<img src="{{MEDIA_URL}}img/devderby/judges/davidwalsh.jpg" alt="" class="photo" width="100" height="100"></a></h3>
-            <h4 class="title">{{ _("Web Developer") }}</h4>
-            <h4 class="title">{{ _("Core Developer, MooTools JavaScript Framework") }}</h4>
-            <p class="twitter"><a href="http://twitter.com/davidwalshblog" class="url nickname">@davidwalshblog</a></p>
+            <h3><a href="http://james.padolsey.com/" class="fn url">James Padolsey<img src="{{MEDIA_URL}}img/devderby/judges/jamespadolsey.jpg" alt="" class="photo" width="100" height="100"></a></h3>
+            <h4 class="title">{{ _("UI Developer, CTO at Storygami") }}</h4>
+            <p class="twitter"><a href="http://twitter.com/padolsey" class="url nickname">@padolsey</a></p>
             <p>
               {% trans %}
-              David Walsh is a web development enthusiast whose experience ranges from development with the
-              <a href="http://mootools.net">MooTools JavaScript Framework</a>, to hacking the <a href="http://dojotoolkit.org">Dojo Toolkit</a>,
-              to experimenting with just about everything on <a href="http://davidwalsh.name">his blog</a>. He
-              spends his days improving the <a href="http://developer.mozilla.org">Mozilla Developer Network</a>
-              and <a href="http://marketplace.mozilla.org">Mozilla Marketplace</a> websites at Mozilla.
+              James is a London-based UI Developer with a passion for
+              JavaScript, HTML5 and anything that enables him and others to
+              create stuff of value. He's currently freelancing and working on
+              interactive media at Storygami, a new startup that he's the CTO
+              of. James shares opinionated technical articles and code on his
+              website and github.
               {% endtrans %}
             </p>
           </li>
           <li class="vcard">
-            <h3><a href="http://www.misfitgeek.com/" class="fn url">Joe Stagner<img src="{{MEDIA_URL}}img/devderby/judges/joestagner.jpg" alt="" class="photo" width="100" height="100"></a></h3>
-            <h4 class="title">{{ _("Opinionated Misfit Geek") }}</h4>
-            <p class="twitter"><a href="http://twitter.com/MisfitGeek" class="url nickname">@MisfitGeek</a></p>
+            <h3><a href="http://www.janetswisher.com/" class="fn url">Janet Swisher<img src="{{MEDIA_URL}}img/devderby/judges/janetswisher.jpg" alt="" class="photo" width="100" height="100"></a></h3>
+            <h4 class="title">{{ _("Developer Engagement Community Organizer, Mozilla") }}</h4>
+            <p class="twitter"><a href="http://twitter.com/jmswisher" class="url nickname">@jmswisher</a></p>
             <p>
               {% trans %}
-              Joe is a software development professional with nearly 30 years of engineering and IT business experience.
-              Joe is a Senior Program manager at Mozilla focusing on the HTML5/standards-based application development
-              ecosystem. Prior to joining Mozilla, Joe spent 10 years in the Microsoft Developer Tools and Platforms group.
-              Before that, he was a serial startup guy riding the dot-com wave.
-              {% endtrans %}
-            </p>
-          </li>
-          <li class="vcard">
-            <h3><a href="http://johnhammink.blogspot.com/" class="fn url">John Hammink<img src="{{MEDIA_URL}}img/devderby/judges/johnhammink.jpg" alt="" class="photo" width="100" height="100"></a></h3>
-            <h4 class="title">{{ _("Lead B2G QA") }}</h4>
-            <h4 class="title">{{ _("Evangelist") }}</h4>
-            <p class="twitter"><a href="http://twitter.com/Rijksband" class="url nickname">@Rijksband</a></p>
-            <p>
-              {% trans %}
-              John Hammink is the test lead on, and evangelist for Firefox OS and the Web APIs that support it. Prior
-              to joining Mozilla in 2011, he established a certification program for Voice over IP provider Skype,
-              which aims to measure the quality of the user experience for all facets of hardware and software products
-              that integrate with Skype's open API.  He is also an accomplished session musician and songwriter,
-              primarily for Coon Records in Russia and Pusher Records in France.
+              Janet has been wandering around software development since the
+              twentieth century, and around open source software and
+              documentation since 2004. She started working for Mozilla on
+              developer documentation in 2010, and recently became Community
+              Manager for Developer Engagement. Her superpower is taking things
+              literally.
               {% endtrans %}
             </p>
           </li>
@@ -206,10 +217,36 @@
         </ul>
       </section>
     
+    {% else %}
+
+      {% trans %}
+        <div style="padding-right: 20px;">
+          <h2>Dev Derby on Hiatus</h2>
+          <p>The Dev Derby is on hiatus while we work on revamping the contest series. When it returns, you may see some changes in the contest format. However, the Dev Derby mission remains unchanged: to provide a platform that helps web developers learn, share, and push the web forward.</p>
+
+          <p>See you soon!</p>
+        </div>
+      {% endtrans %}
+
+      <div style="padding-right: 20px;">
+        <header>
+            <h2>{{_("Previous Dev Derby Challenges")}}</h2>
+        </header>
+        <ul class="previous">
+            {% for tag_name in previous_challenge_tag_names %}
+                <li>
+                  <h3><a href="{{ devderby_tag_to_date_url(tag_name) }}"><span>{{ tag_meta(tag_name, 'dateline') }}</span> {{ tag_meta(tag_name, 'short_title') }}</a></h3>
+                  <p class="desc">{{ tag_meta(tag_name, 'summary') }}</p>
+                </li>
+            {% endfor %}
+        </ul>
+      </div>
+
+    {% endif %}
     </section><!-- /#current-challenge -->
   </div><!-- /.main -->
       
-  <div class="sub">
+  <div class="column-strip sub">
     {% if previous_winner_qs|count > 0 %}
     {% set submission = previous_winner_qs[0] %}
     <section id="prev-winner">
@@ -225,11 +262,10 @@
     <section id="challenge-prizes">
       {% trans %}
       <h1>Prizes</h1>
-      <img src="{{MEDIA_URL}}img/devderby/prize-androids.png" alt="Android mobile device" width="135" height="150" class="prize"/>
       <ol>
         <li class="first">
           <h3>Android mobile device</h3>
-          <p>Winner gets an Android mobile device from <a rel="external" href="http://www.motorola.com/Consumers/US-EN/Consumer-Product-and-Services/Mobile-Phones/">Motorola</a> or <a rel="external" href="http://www.samsung.com/us/mobile/cell-phones">Samsung</a>.</p>
+          <p>Winner gets an Android mobile device from <a rel="external" href="http://www.samsung.com/us/mobile/cell-phones">Samsung</a>.</p>
         </li>
         <li class="second">
           <h3>Rickshaw laptop bag</h3>
@@ -243,12 +279,13 @@
       {% endtrans %}
     </section><!-- /#challenge-prizes -->
   </div><!-- /.sub -->
-    
+      
+    </div>
     
     <section id="resources">
       <h3>{{_("Resources")}}</h3>
       <ul>
-        <li class="res-docs"><a href="{{ url('docs') }}">{{_("Docs")}}</a></li>
+        <li class="res-docs"><a href="{{ devmo_url('Web') }}">{{_("Docs")}}</a></li>
         <li class="res-demos"><a href="{{ url('demos') }}">{{_("Demos")}}</a></li>
         <li class="res-articles"><a href="{{ url('learn') }}">{{_("Articles")}}</a></li>
       </ul>

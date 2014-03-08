@@ -5,6 +5,13 @@
 ReWriteEngine On
 RewriteBase /
 
+# Old index.php redirects
+RewriteCond %{QUERY_STRING} ^title=http [NC]
+RewriteRule ^index\.php$ / [L,NC]
+
+RewriteCond %{QUERY_STRING} ^title=(.*)$ [NC]
+RewriteRule ^index\.php$ %1 [R=301,L,NC]
+
 # Links to FTP'ed code samples and examples
 RewriteRule ^patches(.*) data/www/patches$1 [L]
 RewriteRule ^presentations(.*) data/www/presentations$1 [L]
@@ -14,21 +21,39 @@ RewriteRule ^devnews(.*) data/www/devnews$1 [L]
 RewriteRule ^web-tech(.*) data/www/web-tech$1 [L]
 RewriteRule ^css(.*) data/www/css$1 [L]
 
+# Disable robots on dev and stage servers
+RewriteCond %{HTTP_HOST} allizom
+RewriteRule ^robots.txt$ media/robots-go-away.txt [L]
+
 # Rewrites to robots & sitemaps
 RewriteRule ^robots.txt$ media/robots.txt [L]
 RewriteRule ^sitemap.xml$ media/sitemap.xml [L]
 RewriteRule ^sitemaps/([\w\-]*)/sitemap.xml$ media/sitemaps/$1/sitemap.xml [L]
+
+# Bug 887428 - Misprinted URL in promo materials
+RewriteRule ^Firefox_OS/Security$ docs/Mozilla/Firefox_OS/Security [R=301,L,NC]
+
+# Old landing pages. The regex, adapted from Bedrock, captures locale prefixes.
+RewriteRule ^(\w{2,3}(?:-\w{2})?/)?mobile/?$ /docs/Mozilla/Mobile [R=301,L]
+RewriteRule ^(\w{2,3}(?:-\w{2})?/)?addons/?$ /Add-ons [R=301,L]
+RewriteRule ^(\w{2,3}(?:-\w{2})?/)?mozilla/?$ /docs/Mozilla [R=301,L]
+RewriteRule ^(\w{2,3}(?:-\w{2})?/)?web/?$ /docs/Web [R=301,L]
+RewriteRule ^(\w{2,3}(?:-\w{2})?/)?learn/html5/?$ /docs/Web/Guide/HTML/HTML5 [R=301,L]
 
 # Some blanket section moves / renames
 RewriteRule ^En/JavaScript/Reference/Objects/Array$ en-US/docs/JavaScript/Reference/Global_Objects/Array [R=301,L,NC]
 RewriteRule ^En/JavaScript/Reference/Objects$ en-US/docs/JavaScript/Reference/Global_Objects/Object [R=301,L,NC]
 RewriteRule ^En/Core_JavaScript_1\.5_Reference/Objects/(.*) en-US/docs/JavaScript/Reference/Global_Objects/$1 [R=301,L,NC]
 RewriteRule ^En/Core_JavaScript_1\.5_Reference/(.*) en-US/docs/JavaScript/Reference/$1 [R=301,L,NC]
+RewriteRule ^([\w\-]*)/HTML5$ $1/docs/HTML/HTML5 [R=301,L,NC]
+RewriteRule web-tech/2008/09/12/css-transforms /docs/CSS/Using_CSS_transforms [R=301,L]
+RewriteRule ^([\w\-]*)/docs/?$ $1/docs/Web [R=301,L,NC]
 
 # Off-site redirects
 RewriteRule ^contests/$ http://labs.mozilla.com/contests/extendfirefox/ [R=302]
 RewriteRule ^contests/extendfirefox(/.*)? http://labs.mozilla.com/contests/extendfirefox$1 [R=302]
 RewriteRule ^es4(/.*)?$ http://wiki.ecmascript.org/ [R]
+RewriteRule devnews/index.php/feed/atom/ https://blog.mozilla.org/feed/ [R=301,L]
 
 # HACK: Django will eventually redirect the user to the right spot, but skip a
 # couple of redirects for these known legacy locales

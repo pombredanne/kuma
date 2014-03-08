@@ -1,8 +1,9 @@
-# Django settings for kitsune project.
+# Django settings for kuma project.
 from datetime import date
 import logging
 import os
 import platform
+import json
 
 from django.utils.functional import lazy
 from django.utils.translation import ugettext_lazy as _
@@ -12,11 +13,6 @@ from sumo_locales import LOCALES
 DEBUG = False
 TEMPLATE_DEBUG = DEBUG
 
-LOG_LEVEL = logging.WARN
-SYSLOG_TAG = 'http_app_kuma'
-LOGGING = {
-           'loggers': {},
-}
 ROOT = os.path.dirname(os.path.abspath(__file__))
 path = lambda *a: os.path.join(ROOT, *a)
 
@@ -26,9 +22,11 @@ ADMINS = (
     # ('Your Name', 'your_email@domain.com'),
 )
 
-SITE_URL = 'https://developer.mozilla.org'
 PROTOCOL = 'https://'
 DOMAIN = 'developer.mozilla.org'
+SITE_URL = PROTOCOL + DOMAIN
+PRODUCTION_URL = SITE_URL
+USE_X_FORWARDED_HOST = True
 
 MANAGERS = ADMINS
 
@@ -54,11 +52,6 @@ MIGRATION_DATABASES = {
     },
 }
 
-DATABASE_ROUTERS = ('multidb.PinningMasterSlaveRouter',)
-
-# Put the aliases for your slave databases in this list
-SLAVE_DATABASES = []
-
 # Dekiwiki has a backend API. protocol://hostname:port
 # If set to False, integration with MindTouch / Dekiwiki will be disabled
 DEKIWIKI_ENDPOINT = False # 'https://developer-stage9.mozilla.org'
@@ -69,6 +62,25 @@ DEKIWIKI_MOCK = True
 CACHE_BACKEND = 'locmem://?timeout=86400'
 CACHE_PREFIX = 'kuma:'
 CACHE_COUNT_TIMEOUT = 60  # seconds
+
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'TIMEOUT': 60,
+        'KEY_PREFIX': 'kuma',
+    },
+    # NOTE: The 'secondary' cache should be the same as 'default' in
+    # settings_local. The only reason it exists is because we had some issues
+    # with caching, disabled 'default', and wanted to selectively re-enable
+    # caching on a case-by-case basis to resolve the issue.
+    'secondary': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'TIMEOUT': 60,
+        'KEY_PREFIX': 'kuma',
+    }
+}
+
+SECONDARY_CACHE_ALIAS = 'secondary'
 
 # Addresses email comes from
 DEFAULT_FROM_EMAIL = 'notifications@developer.mozilla.org'
@@ -99,16 +111,11 @@ SUMO_LANGUAGES = (
     'zh-TW',
 )
 
-#LANGUAGE_CHOICES = tuple([(i, LOCALES[i].native) for i in SUMO_LANGUAGES])
-#LANGUAGES = dict([(i.lower(), LOCALES[i].native) for i in SUMO_LANGUAGES])
-
-#LANGUAGE_URL_MAP = dict([(i.lower(), i) for i in SUMO_LANGUAGES])
-
 # Accepted locales
-MDN_LANGUAGES = ('en-US', 'ar', 'de', 'it', 'el', 'es', 'fa', 'fi', 'fr', 'cs',
-                 'ca', 'fy-NL', 'ga-IE', 'he', 'hr', 'hu', 'id', 'it', 'ja',
-                 'ka', 'ko', 'nl', 'pl', 'pt-BR', 'pt-PT', 'ro', 'ru', 'sq',
-                 'th', 'tr', 'vi', 'zh-CN', 'zh-TW')
+MDN_LANGUAGES = ('en-US', 'ar', 'bn-BD', 'de', 'el', 'es', 'fa', 'fi', 'fr',
+                 'cs', 'ca', 'fy-NL', 'ga-IE', 'he', 'hr', 'hu', 'id', 'it',
+                 'ja', 'ka', 'ko', 'ms', 'nl', 'pl', 'pt-BR', 'pt-PT', 'ro',
+                 'ru', 'sq', 'th', 'tr', 'vi', 'zh-CN', 'zh-TW')
 RTL_LANGUAGES = ('ar', 'fa', 'fa-IR', 'he')
 
 DEV_POOTLE_PRODUCT_DETAILS_MAP = {
@@ -117,10 +124,41 @@ DEV_POOTLE_PRODUCT_DETAILS_MAP = {
     'xx-testing': 'x-testing',
 }
 
+# Override generic locale handling with explicit mappings.
+# Keys are the requested locale; values are the delivered locale.
+LOCALE_ALIASES = {
+    # Treat "English (United States)" as the canonical "English".
+    'en': 'en-US',
+
+    # Create aliases for over-specific locales.
+    'bn': 'bn-BD',
+    'fy': 'fy-NL',
+    'ga': 'ga-IE',
+    'gu': 'gu-IN',
+    'hi': 'hi-IN',
+    'hy': 'hy-AM',
+    'pa': 'pa-IN',
+    'sv': 'sv-SE',
+    'ta': 'ta-LK',
+
+    # Map a prefix to one of its multiple specific locales.
+    'pt': 'pt-PT',
+    'sr': 'sr-Cyrl',
+    'zh': 'zh-CN',
+
+    # Create aliases for locales which do not share a prefix.
+    'nb-NO': 'no',
+    'nn-NO': 'no',
+
+    # Create aliases for locales which use region subtags to assume scripts.
+    'zh-Hans': 'zh-CN',
+    'zh-Hant': 'zh-TW',
+}
+
 try:
     DEV_LANGUAGES = [
         loc.replace('_','-') for loc in os.listdir(path('locale'))
-        if os.path.isdir(path('locale', loc)) 
+        if os.path.isdir(path('locale', loc))
             and loc not in ['.svn', '.git', 'templates']
     ]
     for pootle_dir in DEV_LANGUAGES:
@@ -132,16 +170,10 @@ except OSError:
 
 PROD_LANGUAGES = MDN_LANGUAGES
 
-def lazy_lang_url_map():
-    # for bug 664330
-    # from django.conf import settings
-    # langs = DEV_LANGUAGES if (getattr(settings, 'DEV', False) or getattr(settings, 'STAGE', False)) else PROD_LANGUAGES
-    langs = PROD_LANGUAGES
-    lang_url_map = dict([(i.lower(), i) for i in langs])
-    lang_url_map['pt'] = 'pt-PT'
-    return lang_url_map
-
-LANGUAGE_URL_MAP = lazy(lazy_lang_url_map, dict)()
+LANGUAGE_URL_MAP = dict([(i.lower(), i) for i in PROD_LANGUAGES])
+for requested_lang, delivered_lang in LOCALE_ALIASES.items():
+    if delivered_lang in PROD_LANGUAGES:
+        LANGUAGE_URL_MAP[requested_lang.lower()] = delivered_lang
 
 # Override Django's built-in with our native names
 def lazy_langs():
@@ -171,7 +203,7 @@ def lazy_language_deki_map():
 LANGUAGE_DEKI_MAP = lazy(lazy_language_deki_map, dict)()
 
 # List of MindTouch locales mapped to Kuma locales.
-# 
+#
 # Language in MindTouch pages are first determined from the locale in the page
 # title, with a fallback to the language in the page record.
 #
@@ -185,14 +217,14 @@ LANGUAGE_DEKI_MAP = lazy(lazy_language_deki_map, dict)()
 #
 # Then, the database languages were inventoried like so:
 #
-#     select page_language, count(page_id) as ct 
+#     select page_language, count(page_id) as ct
 #     from pages group by page_language order by ct desc;
 #
 # Also worth noting, these are locales configured in the prod Control Panel:
 #
 # en,ar,ca,cs,de,el,es,fa,fi,fr,he,hr,hu,it,ja,
 # ka,ko,nl,pl,pt,ro,ru,th,tr,uk,vi,zh-cn,zh-tw
-# 
+#
 # The Kuma side was picked from elements of the MDN_LANGUAGES list in
 # settings.py, and a few were added to match MindTouch locales.
 #
@@ -243,6 +275,9 @@ MDC_PAGES_DIR = path('../mdc_pages')
 # to load the internationalization machinery.
 USE_I18N = True
 USE_L10N = True
+LOCALE_PATHS = (
+    path('locale'),
+)
 
 # Use the real robots.txt?
 ENGAGE_ROBOTS = False
@@ -258,30 +293,36 @@ HUMANSTXT_ROOT = MEDIA_ROOT
 # trailing slash if there is a path component (optional in other cases).
 # Examples: "http://media.lawrence.com", "http://example.com/media/"
 MEDIA_URL = '/media/'
+STATIC_URL = '/static/'
+STATIC_ROOT = path('static')
 
 SERVE_MEDIA = False
 
-# URL prefix for admin media -- CSS, JavaScript and images. Make sure to use a
-# trailing slash.
-# Examples: "http://foo.com/media/", "/media/".
-ADMIN_MEDIA_PREFIX = '/admin-media/'
-
 # Paths that don't require a locale prefix.
-SUPPORTED_NONLOCALES = ('media', 'admin', 'robots.txt', 'services',
-                        '1', 'files', '@api', )
+SUPPORTED_NONLOCALES = ('media', 'admin', 'robots.txt', 'services', 'static',
+                        '1', 'files', '@api', 'grappelli',
+                        '.well-known')
 
 # Make this unique, and don't share it with anybody.
 SECRET_KEY = '#%tc(zja8j01!r#h_y)=hy!^k)9az74k+-ib&ij&+**s3-e^_z'
 
 # List of callables that know how to import templates from various sources.
 TEMPLATE_LOADERS = (
+    'jingo.Loader',
     'django.template.loaders.filesystem.Loader',
     'django.template.loaders.app_directories.Loader',
-#     'django.template.loaders.eggs.Loader',
+)
+
+JINGO_EXCLUDE_APPS = (
+    'admin',
+    'admindocs',
+    'registration',
+    'grappelli',
+    'waffle'
 )
 
 TEMPLATE_CONTEXT_PROCESSORS = (
-    'django.core.context_processors.auth',
+    'django.contrib.auth.context_processors.auth',
     'django.core.context_processors.debug',
     'django.core.context_processors.media',
     'django.core.context_processors.request',
@@ -301,8 +342,6 @@ TEMPLATE_CONTEXT_PROCESSORS = (
 )
 
 MIDDLEWARE_CLASSES = (
-    'multidb.middleware.PinningRouterMiddleware',
-
     # This gives us atomic success or failure on multi-row writes. It does not
     # give us a consistent per-transaction snapshot for reads; that would need
     # the serializable isolation level (which InnoDB does support) and code to
@@ -314,34 +353,39 @@ MIDDLEWARE_CLASSES = (
     # LocaleURLMiddleware must be before any middleware that uses
     # sumo.urlresolvers.reverse() to add locale prefixes to URLs:
     'sumo.middleware.LocaleURLMiddleware',
+    'wiki.middleware.DocumentZoneMiddleware',
     'wiki.middleware.ReadOnlyMiddleware',
     'sumo.middleware.Forbidden403Middleware',
     'django.middleware.common.CommonMiddleware',
     'sumo.middleware.RemoveSlashMiddleware',
-    'inproduct.middleware.EuBuildMiddleware',
     'commonware.middleware.NoVarySessionMiddleware',
-    'commonware.middleware.FrameOptionsHeader',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
-    'django.middleware.csrf.CsrfResponseMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'sumo.anonymous.AnonymousIdentityMiddleware',
-    #'twitter.middleware.SessionMiddleware',
     'sumo.middleware.PlusToSpaceMiddleware',
-    'commonware.middleware.HidePasswordOnException',
-    #'dekicompat.middleware.DekiUserMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-    'django_statsd.middleware.GraphiteRequestTimingMiddleware',
-    'django_statsd.middleware.GraphiteMiddleware',
+    'users.middleware.BanMiddleware',
+
+    'badger.middleware.RecentBadgeAwardsMiddleware',
+    'wiki.badges.BadgeAwardingMiddleware',
 )
 
 # Auth
 AUTHENTICATION_BACKENDS = (
     'django_browserid.auth.BrowserIDBackend',
-    'users.backends.Sha256Backend',
-    'dekicompat.backends.DekiUserBackend',
+    'django.contrib.auth.backends.ModelBackend',
+    'teamwork.backends.TeamworkBackend',
 )
 AUTH_PROFILE_MODULE = 'devmo.UserProfile'
+
+PASSWORD_HASHERS = (
+    'users.backends.Sha256Hasher',
+    'django.contrib.auth.hashers.SHA1PasswordHasher',
+    'django.contrib.auth.hashers.MD5PasswordHasher',
+    'django.contrib.auth.hashers.UnsaltedMD5PasswordHasher',
+)
 
 USER_AVATAR_PATH = 'uploads/avatars/'
 DEFAULT_AVATAR = MEDIA_URL + 'img/avatar-default.png'
@@ -349,13 +393,18 @@ AVATAR_SIZE = 48  # in pixels
 ACCOUNT_ACTIVATION_DAYS = 30
 MAX_AVATAR_FILE_SIZE = 131072  # 100k, in bytes
 
-ROOT_URLCONF = '%s.urls' % ROOT_PACKAGE
+ROOT_URLCONF = 'urls'
 
 TEMPLATE_DIRS = (
     # Put strings here, like "/home/html/django_templates"
     # Always use forward slashes, even on Windows.
     # Don't forget to use absolute paths, not relative paths.
     path('templates'),
+)
+
+STATICFILES_FINDERS = (
+    'django.contrib.staticfiles.finders.AppDirectoriesFinder',
+    'django.contrib.staticfiles.finders.FileSystemFinder',
 )
 
 # TODO: Figure out why changing the order of apps (for example, moving taggit
@@ -367,18 +416,25 @@ INSTALLED_APPS = (
     'django.contrib.sessions',
     'django.contrib.sites',
     'django.contrib.messages',
+
+    'grappelli.dashboard',
+    'grappelli',
     'django.contrib.admin',
+
     'django.contrib.sitemaps',
+    'django.contrib.staticfiles',
 
     # BrowserID
     'django_browserid',
 
     # MDN
-    'dekicompat',
     'devmo',
     'docs',
     'feeder',
     'landing',
+    'search',
+    'users',
+    'wiki',
 
     # DEMOS
     'demos',
@@ -397,37 +453,19 @@ INSTALLED_APPS = (
     'constance',
     'waffle',
     'soapbox',
-    'django_statsd',
     'authkeys',
-
-    # SUMO
-    'users',
-    ROOT_PACKAGE,
-    #'authority',
-    #'timezones',
-    #'access',
-    #'sumo',
-    # TODO: Reenable search when we switch to kuma wiki - or, at least waffle it.
-    'search',
-    #'forums',
+    'tidings',
+    'teamwork',
     'djcelery',
-    'notifications',
-    #'questions',
-    #'kadmin',
     'taggit',
-    #'flagit',
-    #'upload',
-    'wiki',
-    #'kbforums',
+    'dbgettext',
+
     'dashboards',
-    'gallery',
-    #'customercare',
-    #'twitter',
-    #'chat',
-    #'inproduct',
+    'kpi',
 
     # migrations
     'south',
+    'rest_framework',
 
     # testing.
     'django_nose',
@@ -435,6 +473,8 @@ INSTALLED_APPS = (
 
     # other
     'humans',
+
+    'badger',
 )
 
 TEST_RUNNER = 'test_utils.runner.RadicalTestSuiteRunner'
@@ -446,11 +486,13 @@ FEEDER_TIMEOUT = 6 # in seconds
 def JINJA_CONFIG():
     import jinja2
     from django.conf import settings
+    from django.core.cache.backends.memcached import CacheClass as MemcachedCacheClass
     from caching.base import cache
     config = {'extensions': ['tower.template.i18n', 'caching.ext.cache',
-                             'jinja2.ext.with_', 'jinja2.ext.loopcontrols'],
+                             'jinja2.ext.with_', 'jinja2.ext.loopcontrols',
+                             'jinja2.ext.autoescape'],
               'finalize': lambda x: x if x is not None else ''}
-    if 'memcached' in cache.scheme and not settings.DEBUG:
+    if isinstance(cache, MemcachedCacheClass) and not settings.DEBUG:
         # We're passing the _cache object directly to jinja because
         # Django can't store binary directly; it enforces unicode on it.
         # Details: http://jinja.pocoo.org/2/documentation/api#bytecode-cache
@@ -473,36 +515,17 @@ DOMAIN_METHODS = {
     'messages': [
         ('vendor/**', 'ignore'),
         ('apps/access/**', 'ignore'),
-        ('apps/chat/**', 'ignore'),
-        ('apps/customercare/**', 'ignore'),
         ('apps/dashboards/**', 'ignore'),
-        ('apps/flagit/**', 'ignore'),
-        ('apps/forums/**', 'ignore'),
-        ('apps/gallery/**', 'ignore'),
-        ('apps/inproduct/**', 'ignore'),
         ('apps/kadmin/**', 'ignore'),
-        ('apps/kbforums/**', 'ignore'),
-        ('apps/questions/**', 'ignore'),
-        ('apps/search/**', 'ignore'),
         ('apps/sumo/**', 'ignore'),
-        ('apps/tags/**', 'ignore'),
-        ('apps/twitter/**', 'ignore'),
-        ('apps/upload/**', 'ignore'),
         ('apps/**.py',
             'tower.management.commands.extract.extract_tower_python'),
         ('**/templates/**.html',
             'tower.management.commands.extract.extract_tower_template'),
     ],
-#    'lhtml': [
-#        ('apps/forums/**', 'ignore'),
-#        ('apps/questions/**', 'ignore'),
-#        ('**/templates/**.lhtml',
-#            'tower.management.commands.extract.extract_tower_template'),
-#    ],
     'javascript': [
         # We can't say **.js because that would dive into any libraries.
-        ('media/ckeditor/plugins/mdn-link/**.js', 'javascript'),
-        ('media/ckeditor/plugins/mdn-syntaxhighlighter/**.js', 'javascript'),
+        ('media/js/libs/ckeditor/plugins/mdn-link/**.js', 'javascript')
     ],
 }
 
@@ -519,200 +542,173 @@ STANDALONE_DOMAINS = [
 TOWER_ADD_HEADERS = True
 
 # Bundles for JS/CSS Minification
+JINGO_MINIFY_USE_STATIC = False
 MINIFY_BUNDLES = {
     'css': {
         'mdn': (
+            'css/fonts.css',
             'css/mdn-screen.css',
-            'css/modals.css',
-            'css/mdn-video-player.css',
-            'css/mdn-forums-sidebar-module.css',
-            'css/mdn-calendar.css',
+            'css/libs/font-awesome/css/font-awesome.css',
+            'redesign/css/main.css',
+            'redesign/css/badges.css',
+        ),
+        'jquery-ui': (
+            'js/libs/jquery-ui-1.10.3.custom/css/ui-lightness/jquery-ui-1.10.3.custom.min.css',
+            'css/jqueryui/moz-jquery-plugins.css',
+            'redesign/css/jquery-ui-customizations.css',
         ),
         'demostudio': (
             'css/demos.css',
+            'redesign/css/demo-studio.css',
         ),
         'devderby': (
             'css/devderby.css',
         ),
-        'common': (
-            'css/reset.css',
-            'global/headerfooter.css',
-            'css/kbox.css',
-            'css/main.css',
-        ),
-        # TODO: remove dependency on jquery ui CSS and use our own
-        'jqueryui/jqueryui': (
-            'css/jqueryui/jquery-ui-1.8.14.custom.css',
-            #'css/jqueryui/jqueryui.css',
-        ),
-        'forums': (
-            'css/forums.css',
-        ),
-        'questions': (
-            'css/to-delete.css',
-            'css/questions.css',
-            'css/tags.css',
+        'home': (
+            'redesign/css/home.css',
+            'js/libs/owl.carousel/owl-carousel/owl.carousel.css',
+            'js/libs/owl.carousel/owl-carousel/owl.theme.css',
         ),
         'search': (
-            'css/search.css',
+            'redesign/css/search.css',
         ),
         'wiki': (
             'css/wiki.css',
-            'css/modals.css',
             'css/wiki-screen.css',
-            'syntaxhighlighter/styles/shCore.css',
-            'syntaxhighlighter/styles/shThemeDefault.css',
-            'css/jqueryui/jqueryui.css',
-            'css/jqueryui/jquery-ui-1.8.14.custom.css',
-            'css/jqueryui/moz-jquery-plugins.css'
+            'redesign/css/wiki.css',
+            'redesign/css/zones.css',
+            'redesign/css/diff.css',
         ),
-        'wiki-print': (
-            'css/wiki-print.css',
+        'sphinx': (
+            'redesign/css/wiki.css',
+            'redesign/css/sphinx.css',
         ),
         'dashboards': (
             'css/dashboards.css',
             'js/libs/DataTables-1.9.4/media/css/jquery.dataTables.css',
             'js/libs/DataTables-1.9.4/extras/Scroller/media/css/dataTables.scroller.css',
         ),
-        'home': (
-            'css/home.css',
-        ),
-        'gallery': (
-            'css/to-delete.css',
-            'css/gallery.css',
-        ),
-        'ie': (
-            'css/ie.css',
-        ),
-        'customercare': (
-            'css/customercare.css',
-        ),
-        'chat': (
-            'css/chat.css',
-        ),
         'users': (
-            'css/users.css',
-        ),
-        'monitor': (
-            'css/monitor.css',
+            'redesign/css/users.css',
         ),
         'tagit': (
-            'css/jquery.tagit.css',
+            'css/libs/jquery.tagit.css',
+        ),
+        'syntax-prism': (
+            'js/libs/prism/themes/prism.css',
+            'js/libs/prism/plugins/line-highlight/prism-line-highlight.css',
+            'js/libs/prism/plugins/ie8/prism-ie8.css',
+            'js/prism-mdn/plugins/line-numbering/prism-line-numbering.css',
+            'js/prism-mdn/components/prism-json.css',
+            'redesign/css/wiki-syntax.css',
+        ),
+        'promote': (
+            'redesign/css/promote.css',
+        ),
+        'error': (
+            'redesign/css/error.css',
+        ),
+        'error-404': (
+            'redesign/css/error.css',
+            'redesign/css/error-404.css',
+        ),
+        'calendar': (
+            'redesign/css/calendar.css',
+        ),
+        'profile': (
+            'redesign/css/profile.css',
+        ),
+        'redesign-dashboards': (
+            'redesign/css/dashboards.css',
+            'redesign/css/diff.css',
+            'js/libs/DataTables-1.9.4/media/css/jquery.dataTables.css',
+            'js/libs/DataTables-1.9.4/extras/Scroller/media/css/dataTables.scroller.css',
+        ),
+        'newsletter': (
+            'redesign/css/newsletter.css',
         ),
     },
     'js': {
-        'mdn': (
-            'js/mdn/jquery-1.4.2.min.js',
-            'js/mdn/init.js',
-            'js/mdn/gsearch.js',
-            'js/mdn/webtrends.js',
-
-            # Home Page
-            # cycle and slideshow only needed on the home page (or any page
-            # featuring the slide show widget).
-            'js/mdn/jquery.cycle.js',
-            'js/mdn/slideshow.js',
-
-            # Used only on pages with video popups
-            'js/mdn/video-player.js',
-
-            'js/mdn/jquery.simplemodal.1.4.1.min.js',
+        'redesign-main': (
+            'js/jquery-upgrade-compat.js',
+            'redesign/js/components.js',
+            'redesign/js/main.js',
+            'redesign/js/badges.js',
+        ),
+        'jquery2': (
+            'js/libs/jquery-2.1.0.js',
+        ),
+        'jquery1': (
+            'js/libs/jquery-1.9.1.js',
+        ),
+        'home': (
+            'js/libs/owl.carousel/owl-carousel/owl.carousel.js',
+            'redesign/js/home.js'
+        ),
+        'popup': (
+            'js/jquery-upgrade-compat.js',
+            'js/libs/jquery-ui-1.10.3.custom/js/jquery-ui-1.10.3.custom.min.js',
+            'js/modal-control.js',
         ),
         'profile': (
-            'js/mdn/profile.js',
+            'js/profile.js',
             'js/moz-jquery-plugins.js',
         ),
         'events': (
             'js/libs/jquery.gmap-1.1.0.js',
-            'js/libs/jquery.tablesorter.min.js',
-            'js/mdn/calendar.js',
+            'js/calendar.js',
         ),
         'demostudio': (
-            'js/mdn/jquery.hoverIntent.minified.js',
-            'js/mdn/jquery.scrollTo-1.4.2-min.js',
-            'js/mdn/demos.js',
-            'js/mdn/modal-control.js'
+            'js/libs/jquery.hoverIntent.minified.js',
+            'js/libs/jquery.scrollTo-1.4.2-min.js',
+            'js/demos.js',
+            'js/libs/jquery-ui-1.10.3.custom/js/jquery-ui-1.10.3.custom.min.js',
+            'js/modal-control.js',
         ),
         'demostudio_devderby_landing': (
-            'js/mdn/demos-devderby-landing.js',
+            'js/demos-devderby-landing.js',
         ),
-        'common': (
-            'js/libs/jquery.min.js',
-            'js/libs/modernizr-1.6.min.js',
-            #'js/kbox.js',
-            #'global/menu.js',
-            #'js/main.js',
-        ),
-        'libs/jqueryui': (
-            #'js/libs/jqueryui.min.js',
-            'js/libs/jquery-ui-1.8.14.custom.min.js',
+        'jquery-ui': (
+            'js/libs/jquery-ui-1.10.3.custom/js/jquery-ui-1.10.3.custom.min.js',
+            'js/moz-jquery-plugins.js',
         ),
         'libs/tagit': (
             'js/libs/tag-it.js',
         ),
-        'questions': (
-            'js/markup.js',
-            'js/libs/jquery.ajaxupload.js',
-            'js/upload.js',
-            'js/questions.js',
-            'js/tags.js',
-        ),
         'search': (
-            'js/search.js',
+            'js/store.js',
+            'redesign/js/search.js',
         ),
-        'forums': (
-            'js/markup.js',
-            'js/forums.js',
-        ),
-        'gallery': (
-            'js/libs/jquery.ajaxupload.js',
-            'js/gallery.js',
-        ),
-        'wiki': (
-            'js/libs/django/prepopulate.js',
-            'syntaxhighlighter/scripts/shCore.js',
-            'syntaxhighlighter/scripts/shBrushBash.js',
-            'syntaxhighlighter/scripts/shBrushCpp.js',
-            'syntaxhighlighter/scripts/shBrushCss.js',
-            'syntaxhighlighter/scripts/shBrushJava.js',
-            'syntaxhighlighter/scripts/shBrushJScript.js',
-            'syntaxhighlighter/scripts/shBrushPhp.js',
-            'syntaxhighlighter/scripts/shBrushXml.js',
-            'syntaxhighlighter/scripts/shBrushPlain.js',
-            'syntaxhighlighter/scripts/shBrushPython.js',
-            'js/mdn/jquery.simplemodal.1.4.1.min.js',
-            'js/wiki.js',
-            'js/main.js',
-            'js/libs/jqueryui.min.js',
-            'js/moz-jquery-plugins.js',
+        'wiki-edit': (
+            'js/wiki-edit.js',
             'js/libs/tag-it.js',
             'js/wiki-tags-edit.js',
         ),
         'dashboards': (
-            'js/libs/jqueryui.min.js',
-            'js/moz-jquery-plugins.js',
             'js/libs/DataTables-1.9.4/media/js/jquery.dataTables.js',
             'js/libs/DataTables-1.9.4/extras/Scroller/media/js/dataTables.scroller.js',
         ),
-        'customercare': (
-            'js/libs/jquery.NobleCount.js',
-            'js/libs/jquery.cookie.js',
-            'js/libs/jquery.bullseye-1.0.min.js',
-            'js/customercare.js',
-            'js/users.js',
-        ),
-        'chat': (
-            'js/chat.js',
-        ),
         'users': (
-            'js/users.js',
-        ),
-        'mdn_home': (
-            'js/mdn/empty.js',
+            'js/empty.js',
         ),
         'framebuster': (
             'js/framebuster.js',
-        )
+        ),
+        'syntax-prism': (
+            'js/libs/prism/prism.js',
+            'js/prism-mdn/components/prism-json.js',
+            'js/prism-mdn/plugins/line-numbering/prism-line-numbering.js',
+            'js/libs/prism/plugins/line-highlight/prism-line-highlight.js',
+            'js/syntax-prism.js',
+        ),
+        'wiki': (
+            'js/store.js',
+            'redesign/js/search.js',
+            'redesign/js/wiki.js',
+        ),
+        'newsletter': (
+            'redesign/js/newsletter.js',
+        ),
     },
 }
 
@@ -721,36 +717,11 @@ JAVA_BIN = '/usr/bin/java'
 #
 # Session cookies
 SESSION_COOKIE_SECURE = True
+SESSION_COOKIE_HTTPONLY = True
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 
 # Cookie prefix from PHPBB settings.
 PHPBB_COOKIE_PREFIX = 'phpbb3_jzxvr'
-
-#
-# Connection information for Sphinx search
-SPHINX_HOST = '127.0.0.1'
-SPHINX_PORT = 3381
-SPHINXQL_PORT = 3382
-
-SPHINX_INDEXER = '/usr/bin/indexer'
-SPHINX_SEARCHD = '/usr/bin/searchd'
-SPHINX_CONFIG_PATH = path('configs/sphinx/sphinx.conf')
-
-TEST_SPHINX_PATH = path('tmp/test/sphinx')
-TEST_SPHINX_PORT = 3416
-TEST_SPHINXQL_PORT = 3418
-
-SEARCH_MAX_RESULTS = 1000
-SEARCH_RESULTS_PER_PAGE = 10
-
-# Search default settings
-# comma-separated tuple of included category IDs. Negative IDs are excluded.
-SEARCH_DEFAULT_CATEGORIES = (10, 20,)
-SEARCH_SUMMARY_LENGTH = 275
-
-# The length for which we would like the user to cache search forms and
-# results, in minutes.
-SEARCH_CACHE_PERIOD = 15
 
 # Maximum length of the filename. Forms should use this and raise
 # ValidationError if the length is exceeded.
@@ -758,8 +729,8 @@ SEARCH_CACHE_PERIOD = 15
 # Columns are 250 but this leaves 50 chars for the upload_to prefix
 MAX_FILENAME_LENGTH = 200
 MAX_FILEPATH_LENGTH = 250
-# Default storage engine - ours does not preserve filenames
-#DEFAULT_FILE_STORAGE = 'upload.storage.RenameFileStorage'
+
+ATTACHMENT_HOST = 'mdn.mozillademos.org'
 
 # Auth and permissions related constants
 LOGIN_URL = '/users/login'
@@ -781,43 +752,9 @@ IMAGE_UPLOAD_PATH = 'uploads/images/'
 # String must not contain double quotes!
 IMAGE_ALLOWED_MIMETYPES = 'image/jpeg,image/png,image/gif'
 
-# Max number of wiki pages or other questions to suggest might answer the
-# question you're about to ask
-QUESTIONS_MAX_SUGGESTIONS = 5
-# Number of extra suggestion results to pull from Sphinx to make up for
-# possibly deleted wiki pages or question. To be safe, set this to the number
-# of things that could be deleted between indexer runs.
-QUESTIONS_SUGGESTION_SLOP = 3
-
 # Email
 EMAIL_BACKEND = 'django.core.mail.backends.filebased.EmailBackend'
 EMAIL_FILE_PATH = '/tmp/kuma-messages'
-
-# Read-only mode setup.
-READ_ONLY = False
-
-
-# Turn on read-only mode in settings_local.py by putting this line
-# at the VERY BOTTOM: read_only_mode(globals())
-def read_only_mode(env):
-    env['READ_ONLY'] = True
-
-    # Replace the default (master) db with a slave connection.
-    if not env.get('SLAVE_DATABASES'):
-        raise Exception("We need at least one slave database.")
-    slave = env['SLAVE_DATABASES'][0]
-    env['DATABASES']['default'] = env['DATABASES'][slave]
-
-    # No sessions without the database, so disable auth.
-    env['AUTHENTICATION_BACKENDS'] = ()
-
-    # Add in the read-only middleware before csrf middleware.
-    extra = 'sumo.middleware.ReadOnlyMiddleware'
-    before = 'django.middleware.csrf.CsrfViewMiddleware'
-    m = list(env['MIDDLEWARE_CLASSES'])
-    m.insert(m.index(before), extra)
-    env['MIDDLEWARE_CLASSES'] = tuple(m)
-
 
 # Celery
 import djcelery
@@ -835,7 +772,24 @@ CELERY_SEND_TASK_ERROR_EMAILS = True
 CELERYD_LOG_LEVEL = logging.INFO
 CELERYD_CONCURRENCY = 4
 
-CELERY_IMPORTS = ( 'wiki.tasks', )
+CELERY_IMPORTS = (
+    'devmo.tasks',
+    'wiki.tasks',
+    'search.tasks',
+    'tidings.events',
+    'elasticutils.contrib.django.tasks',
+)
+
+CELERY_ANNOTATIONS = {
+    "elasticutils.contrib.django.tasks.index_objects": {
+        "rate_limit": "100/m",
+    },
+    "elasticutils.contrib.django.tasks.unindex_objects": {
+        "rate_limit": "100/m",
+    }
+}
+
+CELERYBEAT_SCHEDULER = 'djcelery.schedulers.DatabaseScheduler'
 
 # Wiki rebuild settings
 WIKI_REBUILD_TOKEN = 'sumo:wiki:full-rebuild'
@@ -852,50 +806,9 @@ TOP_CONTRIBUTORS_CACHE_TIMEOUT = 60 * 60 * 12
 # Do not change this without also deleting all wiki documents:
 WIKI_DEFAULT_LANGUAGE = LANGUAGE_CODE
 
-# Gallery settings
-GALLERY_DEFAULT_LANGUAGE = WIKI_DEFAULT_LANGUAGE
-GALLERY_IMAGE_PATH = 'uploads/gallery/images/'
-GALLERY_IMAGE_THUMBNAIL_PATH = 'uploads/gallery/images/thumbnails/'
-GALLERY_VIDEO_PATH = 'uploads/gallery/videos/'
-GALLERY_VIDEO_URL = None
-GALLERY_VIDEO_THUMBNAIL_PATH = 'uploads/gallery/videos/thumbnails/'
-GALLERY_VIDEO_THUMBNAIL_PROGRESS_URL = MEDIA_URL + 'img/video-thumb.png'
-THUMBNAIL_PROGRESS_WIDTH = 32  # width of the above image
-THUMBNAIL_PROGRESS_HEIGHT = 32  # height of the above image
-VIDEO_MAX_FILESIZE = 16777216  # 16 megabytes, in bytes
 
-# Customer Care settings
-CC_MAX_TWEETS = 500   # Max. no. of tweets in DB
-CC_TWEETS_PERPAGE = 100   # How many tweets to collect in one go. Max: 100.
-CC_SHOW_REPLIES = True  # Show replies to tweets?
-
-CC_TWEET_ACTIVITY_URL = 'https://metrics.mozilla.com/stats/twitter/armyOfAwesomeKillRate.json'  # Tweet activity stats
-CC_TOP_CONTRIB_URL = 'https://metrics.mozilla.com/stats/twitter/armyOfAwesomeTopSoldiers.json'  # Top contributor stats
-CC_TWEET_ACTIVITY_CACHE_KEY = 'sumo-cc-tweet-stats'
-CC_TOP_CONTRIB_CACHE_KEY = 'sumo-cc-top-contrib-stats'
-CC_STATS_CACHE_TIMEOUT = 24 * 60 * 60  # 24 hours
-CC_STATS_WARNING = 30 * 60 * 60  # Warn if JSON data is older than 30 hours
-CC_IGNORE_USERS = ['fx4status']  # User names whose tweets to ignore.
-
-TWITTER_CONSUMER_KEY = ''
-TWITTER_CONSUMER_SECRET = ''
-
-
-NOTIFICATIONS_FROM_ADDRESS = 'notifications@support.mozilla.com'
-# Anonymous watches must be confirmed.
-CONFIRM_ANONYMOUS_WATCHES = True
-
-
-# URL of the chat server.
-CHAT_SERVER = 'https://chat-support.mozilla.com:9091'
-CHAT_CACHE_KEY = 'sumo-chat-queue-status'
-
-WEBTRENDS_WIKI_REPORT_URL = 'https://example.com/see_production.rst'
-WEBTRENDS_USER = r'someaccount\someusername'
-WEBTRENDS_PASSWORD = 'password'
-WEBTRENDS_EPOCH = date(2010, 8, 1)  # When WebTrends started gathering stats on
-                                    # the KB
-WEBTRENDS_REALM = 'Webtrends Basic Authentication'
+TIDINGS_FROM_ADDRESS = 'notifications@developer.mozilla.org'
+TIDINGS_CONFIRM_ANONYMOUS_WATCHES = True
 
 # recaptcha
 RECAPTCHA_USE_SSL = False
@@ -929,8 +842,6 @@ SKIP_SOUTH_TESTS = True
 # TODO: Move migrations for our apps here, rather than living with the app?
 SOUTH_MIGRATION_MODULES = {
     'taggit': 'migrations.south.taggit',
-    # HACK: South treats "database" as the name of constance.backends.database
-    'database': 'migrations.south.constance',
     'djcelery': 'migrations.south.djcelery',
 }
 
@@ -939,6 +850,14 @@ CONSTANCE_DATABASE_CACHE_BACKEND = None
 
 # Settings and defaults controllable by Constance in admin
 CONSTANCE_CONFIG = dict(
+
+    BROWSERID_REALM_JSON = (
+        json.dumps({
+            'realm': ['https://developer.mozilla.org',
+                      'https://marketplace.firefox.com']
+        }),
+        "Define the other sites belonging to this site's BrowserID realm."
+    ),
 
     DEMOS_DEVDERBY_CURRENT_CHALLENGE_TAG = (
         "challenge:2011:september",
@@ -968,15 +887,29 @@ CONSTANCE_CONFIG = dict(
         "Dev derby tags for previous challenges (space-separated tags)"
     ),
 
-    DEKIWIKI_POST_RETRIES = (
-        6,
-        'Number of time to retry dekiwiki/MindTouch post before giving up.'
+    DEMOS_DEVDERBY_HOMEPAGE_FEATURED_DEMO = (
+        0,
+        'The ID of the demo which should be featured on the new homepage structure'
     ),
-    DEKIWIKI_API_RETRY_WAIT = (
+
+    BASKET_RETRIES = (
+        5,
+        'Number of time to retry basket post before giving up.'
+    ),
+    BASKET_RETRY_WAIT = (
         .5,
-        'How long to wait between dekiwiki/Mindtouch api request retries. '
+        'How long to wait between basket api request retries. '
         'We typically multiply this value by the retry number so, e.g., '
         'the 4th retry waits 4*.5 = 2 seconds.'
+    ),
+    BASKET_API_KEY = (
+        '',
+        'API Key to use for basket requests'
+    ),
+
+    BETA_GROUP_NAME = (
+        'Beta Testers',
+        'Name of the django.contrib.auth.models.Group to use as beta testers'
     ),
 
     KUMA_DOCUMENT_RENDER_TIMEOUT = (
@@ -1013,6 +946,14 @@ CONSTANCE_CONFIG = dict(
         'value disables the feature altogether.',
     ),
 
+    KUMA_CUSTOM_SAMPLE_CSS_PATH = (
+        '/en-US/docs/Template:CustomSampleCSS',
+        'Path to a wiki document whose raw content will be loaded as a CSS '
+        'stylesheet for live sample template. Will also cause the ?raw '
+        'parameter for this path to send a Content-Type: text/css header. Empty '
+        'value disables the feature altogether.',
+    ),
+
     DIFF_CONTEXT_LINES = (
         0,
         'Number of lines of context to show in diff display.',
@@ -1024,22 +965,89 @@ CONSTANCE_CONFIG = dict(
     ),
 
     WIKI_ATTACHMENT_ALLOWED_TYPES = (
-        'image/gif image/jpeg image/png image/svg+xml text/html',
+        'image/gif image/jpeg image/png image/svg+xml text/html image/vnd.adobe.photoshop',
         'Allowed file types for wiki file attachments',
     ),
 
-    KUMA_CODE_SAMPLE_HOSTS = (
-        ' '.join([
-            'developer-local.allizom.org',
-            'developer-dev.allizom.org',
-            'developer.allizom.org',
-            'mozillademos.org',
-            'testserver',
-            'localhost:8000'
-        ]),
-        'List of domains from which live code samples may be served '
-        '(space-separated)'
+    KUMA_WIKI_IFRAME_ALLOWED_HOSTS = (
+        '^https?\:\/\/(developer-local.allizom.org|developer-dev.allizom.org|developer.allizom.org|mozillademos.org|testserver|localhost\:8000|(www.)?youtube.com\/embed\/(\.*))',
+        'Regex comprised of domain names that are allowed for IFRAME SRCs'
     ),
+
+    GOOGLE_ANALYTICS_ACCOUNT = (
+        '0',
+        'Google Analytics Tracking Account Number (0 to disable)',
+    ),
+
+    OPTIMIZELY_PROJECT_ID = (
+        '',
+        'The ID value for optimizely Project Code script'
+    ),
+
+    BLEACH_ALLOWED_TAGS = (
+        json.dumps([
+            'a', 'p', 'div',
+        ]),
+        "JSON array of tags allowed through Bleach",
+    ),
+
+    BLEACH_ALLOWED_ATTRIBUTES = (
+        json.dumps({
+            '*': ['id', 'class', 'style'],
+        }),
+        "JSON object associating tags with lists of allowed attributes",
+    ),
+
+    BLEACH_ALLOWED_STYLES = (
+        json.dumps([
+            'font-size', 'text-align',
+        ]),
+        "JSON array listing CSS styles allowed on tags",
+    ),
+
+    WIKI_DOCUMENT_TAG_SUGGESTIONS = (
+        json.dumps([
+            "Accessibility", "AJAX", "API", "Apps",
+            "Canvas", "CSS", "Device", "DOM", "Events",
+            "Extensions", "Firefox", "Firefox OS", "Games",
+            "Gecko", "Graphics", "Internationalization", "History", "HTML", "HTTP", "JavaScript", "Layout",
+            "Localization", "MDN", "Mobile", "Mozilla",
+            "Networking", "Persona", "Places", "Plugins", "Protocols",
+
+            "Reference", "Tutorial", "Landing",
+
+            "junk", "NeedsMarkupWork", "NeedsContent", "NeedsExample",
+        ]),
+        "JSON array listing tag suggestions for documents"
+    ),
+
+    SEARCH_FILTER_TAG_OPTIONS = (
+        json.dumps([
+            "Accessibility", "AJAX", "API", "Apps",
+            "Canvas", "CSS", "Device", "DOM", "Events",
+            "Extensions", "Firefox", "Firefox OS", "Games",
+            "Gecko", "Graphics", "Internationalization", "History", "HTML", "HTTP", "JavaScript", "Layout",
+            "Localization", "MDN", "Mobile", "Mozilla",
+            "Networking", "Persona", "Places", "Plugins", "Protocols",
+
+            "Reference", "Tutorial", "Landing",
+
+            "junk", "NeedsMarkupWork", "NeedsContent", "NeedsExample",
+        ]),
+        "JSON array of tags that are enabled for search faceting"
+    ),
+
+    EXTERNAL_SIGNUP_EMAIL = (
+        '',
+        'The email address to receive external docs signup emails.'
+    ),
+
+    SESSION_CLEANUP_CHUNK_SIZE = (
+        1000,
+        'Number of expired sessions to cleanup up in one go.',
+    ),
+
+
 )
 
 BROWSERID_VERIFICATION_URL = 'https://verifier.login.persona.org/verify'
@@ -1052,12 +1060,81 @@ BASKET_APPS_NEWSLETTER = 'app-dev'
 
 KUMASCRIPT_URL_TEMPLATE = 'http://developer.mozilla.org:9080/docs/{path}'
 
-STATSD_CLIENT = 'django_statsd.clients.normal'
-STATSD_HOST = 'localhost'
-STATSD_PORT = 8125
-STATSD_PREFIX = 'developer'
+ES_DISABLED = True
+ES_LIVE_INDEX = False
 
-GRAPHITE_HOST = 'localhost'
-GRAPHITE_PORT = 2003
-GRAPHITE_PREFIX = 'devmo'
-GRAPHITE_TIMEOUT = 1
+LOG_LEVEL = logging.WARN
+SYSLOG_TAG = 'http_app_kuma'
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'filters': {
+        'require_debug_false': {
+            '()': 'django.utils.log.RequireDebugFalse',
+        },
+        'require_debug_true': {
+            # use from devmo.helpers until we upgrade to django 1.5
+            '()': 'devmo.future.filters.RequireDebugTrue',
+        },
+    },
+    'formatters': {
+        'default': {
+            'format': '{0}: %(asctime)s %(name)s:%(levelname)s %(message)s: '
+                      '%(pathname)s:%(lineno)s'.format(SYSLOG_TAG),
+        }
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'filters': ['require_debug_true'],
+            'level': LOG_LEVEL,
+        },
+        'mail_admins': {
+            'class': 'django.utils.log.AdminEmailHandler',
+            'filters': ['require_debug_false'],
+            'level': logging.ERROR,
+        },
+    },
+    'loggers': {
+        'mdn': {
+            'handlers': ['console'],
+            'propagate': True,
+            # Use the most permissive setting. It is filtered in the handlers.
+            'level': logging.DEBUG,
+        },
+        'django.request': {
+            'handlers': ['console'],
+            'propagate': True,
+            # Use the most permissive setting. It is filtered in the handlers.
+            'level': logging.DEBUG,
+        },
+    },
+}
+
+
+CSRF_COOKIE_SECURE = True
+X_FRAME_OPTIONS = 'DENY'
+
+TEAMWORK_BASE_POLICIES = {
+    'anonymous': (
+        'wiki.view_document',),
+    'authenticated': (
+        'wiki.view_document', 'wiki.add_document', 'wiki.add_revision'),
+}
+
+GRAPPELLI_ADMIN_TITLE = 'Mozilla Developer Network - Admin'
+GRAPPELLI_INDEX_DASHBOARD = 'admin_dashboard.CustomIndexDashboard'
+
+DBGETTEXT_PATH = 'apps/'
+DBGETTEXT_ROOT = 'translations'
+
+def get_user_url(user):
+    from sumo.urlresolvers import reverse
+    return reverse('devmo.views.profile_view', args=[user.username])
+
+ABSOLUTE_URL_OVERRIDES = {
+    'auth.user': get_user_url
+}
+
+OBI_BASE_URL = 'https://backpack.openbadges.org/'

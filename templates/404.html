@@ -1,40 +1,40 @@
 {% extends "base.html" %}
 
+{% set styles = ('error-404',) %}
+
 {% block bodyclass %}error{% endblock %}
-
-{% block extrahead %}
-    <link rel="stylesheet" type="text/css" media="all" href="{{ MEDIA_URL }}css/err404.css">
-{% endblock %}
-
 {% block title %}{{ page_title(_('Not Found')) }}{% endblock %}
 
 {% block content %}
 
 <section id="content">
-<div class="wrap">
-
+  <div class="wrap">
   <section id="content-main" class="full" role="main">
-
-    <h1 class="page-title">Not Found</h1>
-    
+    <h1>Not Found</h1>
     <div id="beastainer">
-			<img id="beast404le" src="{{ MEDIA_URL }}img/beast-404_LE.png" alt="">
-			<img id="beast404re" src="{{ MEDIA_URL }}img/beast-404_RE.png" alt="">
-			<img class="beast 404" src="{{ MEDIA_URL }}img/beast-404.png" alt="">
+      <img id="beast404le" src="{{ MEDIA_URL }}img/beast-404_LE.png" alt="">
+      <img id="beast404re" src="{{ MEDIA_URL }}img/beast-404_RE.png" alt="">
+      <img class="beast 404" src="{{ MEDIA_URL }}img/beast-404.png" alt="">
     </div>
-    
     <p>We're sorry, we couldn't find what you were looking for.</p>
-    
-    <p>You can <a href="#q">try a search</a> or start over on the <a href="{{ url('home') }}">home page</a>.</p>
-    
-    <p>If you were following a broken link, please
-    <a href="https://bugzilla.mozilla.org/enter_bug.cgi?product=Mozilla%20Developer%20Network&component=Website">file a bug.</a>
-    Thanks!</p>
-    
-    <p class="attrib"><small><a href="http://theoatmeal.com/comics/state_web_summer#tumblr">Tumbeasts</a> by Matthew Inman of <a href="http://theoatmeal.com">The Oatmeal</a></small></p>
-    
-  </section>
+    <p>You can try a search or start over on the <a href="{{ url('home') }}">home page</a>.</p>
+    <p>If you were following a documentation link, you can sign in and create the page. Otherwise, please <a href="https://bugzilla.mozilla.org/form.doc" rel="nofollow">file a bug</a>. Thanks!</p>
 
+    <form class="browserid" action="{{url('users.browserid_verify') }}" method="POST">
+        <input id="next" name="next" type="hidden" value="{{ next_url }}"/>
+        {{ browserid_form }}
+
+        <p class="clear">
+          <a href="#" class="persona-button persona-login" data-next="{{ next_url }}">
+            <span class="persona-icon"><i aria-hidden="true"></i></span>
+            <span class="signin">{{ _('Sign in with Persona') }}</span>
+          </a>
+        </p>
+
+    </form>
+
+    <p class="attrib"><small><a href="http://theoatmeal.com/comics/state_web_summer#tumblr" rel="nofollow">Tumbeasts</a> by Matthew Inman of <a href="http://theoatmeal.com" rel="nofollow">The Oatmeal</a></small></p>
+  </section>
 </div>
 </section>
 
@@ -43,4 +43,10 @@
 {% block site_js %}
     {{ super() }}
     {{ js('framebuster') }}
+{% endblock %}
+
+{% block js %}
+<script type="text/javascript">
+window._gaq.push(['_trackEvent', 'Error', '404']);
+</script>
 {% endblock %}

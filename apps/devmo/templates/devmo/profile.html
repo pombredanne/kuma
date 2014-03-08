@@ -3,15 +3,17 @@
 {% set display_name = profile.name | default(profile.user.username, true) %}
 {% set username  = profile.user.username %}
 
-{% block pageid %}{% endblock %}
+{% block body_attributes %}{% endblock %}
 
-{% block bodyclass %}profile{% endblock %}
+{% block bodyclass %}profile profile-display{% endblock %}
 
 {% block title %}{{ page_title(profile.user) }}{% endblock %}
 
 {% block site_css %}
     {{ super() }}
     {{ css('demostudio') }}
+    {{ css('jquery-ui') }}
+    {{ css('profile') }}
 {% endblock %}
 
 {% block site_js %}
@@ -24,10 +26,49 @@
 <div class="wrap">
 
   <section id="content-main" class="full">
-
     <section id="profile-head" class="vcard">
+
+      <div class="extra">
+        <figure class="avatar">
+          <img src="{{ profile.gravatar }}" alt="{{ profile.user.username }}" width="120" height="120" class="photo" />
+        </figure>
+        
+        <ul class="links">
+        {% for site in profile.website_choices %}
+            {% set site_name = site[0] %}
+            {% set site_meta = site[1] %}
+            {% set href = profile.websites[site_name] %}
+            {% if href %}
+                <li class="{{site_name}}"><i class="{{site_meta['fa_icon']}}" aria-hidden="true"></i><a href="{{href}}" rel="me external" class="url">{{site_meta['label']}}</a></li>
+            {% endif %}
+          {% endfor %}
+        </ul>
+      </div>
+
       <div class="main">
         <h1 class="page-title"><span class="nickname">{{ profile.user.username }}</span> {% if profile.fullname %}<b>(<span class="fn">{{ profile.fullname }}</span>)</b>{% endif %}</h1>
+
+        <div class="edit">
+          {% if show_manage_roles_button %}
+              {# TODO: Need a method to detect whether the logged in user can manage any roles, here #}
+              <a href="{{ url('teamwork.views.user_roles', profile.user.username) }}" class="button neutral">{{_("Manage Roles")}}<i aria-hidden="true" class="icon-users"></i></a>
+          {% endif %}
+          {{ ban_link(profile.user, request.user) }}
+          <!-- Only shown for the user and admins -->
+          {% if profile.allows_editing_by(request.user) %}
+              <a id="edit-profile" href="{{ url('devmo.views.profile_edit', username=profile.user.username) }}" class="button neutral">{{_("Edit")}}<i aria-hidden="true" class="icon-pencil"></i></a>
+              <a href="javascript:;" id="advanced-menu" class="button neutral only-icon" {{ disabled_attr }} aria-haspopup="true" aria-owns="advanced-menu-submenu" aria-expanded="false"><span>{{ _('Advanced') }}</span><i aria-hidden="true" class="icon-cog"></i></a>
+              <div class="submenu" id="advanced-menu-submenu">
+                <!-- this page -->
+                <div class="submenu-column">
+                  <div class="title">{{ _('Advanced') }}</div>
+                  <ul>
+                    <li><a href="{{ url('authkeys.list') }}" class="neutral">{{ _("Manage API keys") }}</a></li>
+                  </ul>
+                </div>
+              </div>
+          {% endif %}
+      </div>
   
       {% if profile.title or profile.organization or profile.location or profile.irc_nickname %}
       <ul class="info">
@@ -68,34 +109,16 @@
         </div>
         {% endif %}
 
+        <div class="memberSince">{{ _('Member since {date}') | f(date=profile.user.date_joined.strftime('%B %d, %Y')) }}</div>
       </div>
-      
-      <div class="extra">
-        <figure class="avatar">
-          <img src="{{ profile.gravatar }}" alt="" width="120" height="120" class="photo" />
-        </figure>
-        
-        <ul class="links">
-        {% for site in profile.website_choices %}
-            {% set site_name = site[0] %}
-            {% set site_meta = site[1] %}
-            {% set href = profile.websites[site_name] %}
-            {% if href %}
-                <li class="{{site_name}}"><a href="{{href}}" rel="me external" class="url">{{site_meta['label']}}</a></li>
-            {% endif %}
-          {% endfor %}
-          <li class="docs"><a href="/User:{{profile.user.username}}" rel="me">{{_("Docs user page")}}</a></li>
-        </ul>
-      </div>
-
-      <!-- Only shown for the user and admins -->
-      {% if profile.allows_editing_by(request.user) %}
-          <p class="edit">
-              <a href="{{ url('authkeys.list') }}" class="button">{{_("Manage API Keys")}}</a>
-              <a id="edit-profile" href="{{ url('devmo.views.profile_edit', username=profile.user.username) }}" class="button">{{_("Edit Profile")}}</a>
-          </p>
-      {% endif %}
     </section>
+
+    {% if waffle.flag('badger') and award_list %}
+      <section id="profile-badges" class="profile-section">
+        <h2>{{_("Recent Badge Awards")}}</h2>
+        {% include "badger/includes/awards_as_badges_list.html" %}
+      </section>
+    {% endif %}
 
     {% if demos_page.object_list | length > 0 %} 
         <section id="profile-demos" class="profile-section">
@@ -138,10 +161,10 @@
                           <li><a href="{{ rev.document.get_absolute_url() }}$history" class="history">{{_("View page history")}}</a></li>
                       </ul>
                   </th>
-                  <td>{{ rev.created.strftime('%B %d, %Y') }}<br>
+                  <td>{{ rev.created.strftime('%B %d, %Y') }}<br />
                       {{ rev.created.strftime('%I:%M %p') }}</td>
                   {# TODO: auto-generate smart comment like "N words changed." #}
-                  <td>{{ rev.comment }}</td>
+                  <td>{{ format_comment(rev) }}</td>
                 </tr>
                 {% endfor %}
               </tbody>
@@ -162,7 +185,7 @@
             <h2>{{_('Recent Docs Activity')}}</h2>
           </header>
           {% if profile.user == request.user %}
-            {% trans docs_url=url('docs.views.docs') %}
+            {% trans docs_url=devmo_url('Project:MDN/Contributing/Creating_and_editing_pages') %}
             <p class="none">You haven't contributed to any MDN docs. <a href="{{docs_url}}">Pitch in!</a></p>
             {% endtrans %}
           {% endif %}

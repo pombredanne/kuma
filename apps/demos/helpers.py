@@ -19,8 +19,8 @@ from threadedcomments.forms import ThreadedCommentForm
 from threadedcomments.templatetags import threadedcommentstags
 import threadedcomments.views
 
-from .models import Submission, TAG_DESCRIPTIONS, DEMO_LICENSES
-from . import DEMOS_CACHE_NS_KEY
+from .models import Submission
+from . import DEMOS_CACHE_NS_KEY, TAG_DESCRIPTIONS, DEMO_LICENSES
 
 # Monkeypatch threadedcomments URL reverse() to use devmo's
 from devmo.urlresolvers import reverse
@@ -102,7 +102,7 @@ def profile_link(user, show_gravatar=False, gravatar_size=48,
 
 @register.inclusion_tag('demos/elements/submission_thumb.html')
 def submission_thumb(submission, extra_class=None, thumb_width="200",
-                     thumb_height="150"):
+                     thumb_height="150", is_homepage=False):
     vars = locals()
 
     flags = submission.get_flags()
@@ -127,6 +127,7 @@ def submission_thumb(submission, extra_class=None, thumb_width="200",
     if main_flag in flags_meta:
         vars['main_flag_class'] = flags_meta[main_flag][0]
         vars['main_flag_description'] = flags_meta[main_flag][1]
+    vars['is_homepage'] = is_homepage
 
     return vars
 
@@ -197,8 +198,7 @@ def devderby_tag_to_date_url(tag):
     if not tag:
         return ''
     parts = tag.split(':')
-    return reverse('demos.views.devderby_by_date',
-                   args=(parts[-2], parts[-1]))
+    return reverse('demos_devderby_by_date', args=(parts[-2], parts[-1]))
 
 
 @register.function

@@ -14,7 +14,6 @@ from django.core.cache import cache
 from django.contrib.sites.models import Site
 
 import constance.config
-from django_statsd.clients import statsd
 
 from wiki import KUMASCRIPT_TIMEOUT_ERROR
 
@@ -43,7 +42,8 @@ def should_use_rendered(doc, params, html=None):
             (force_macros or (not no_macros and not show_raw)))
 
 
-def post(request, content, locale=settings.LANGUAGE_CODE):
+def post(request, content, locale=settings.LANGUAGE_CODE,
+         use_constance_bleach_whitelists=False):
     ks_url = settings.KUMASCRIPT_URL_TEMPLATE.format(path='')
     headers = {
         'X-FireLogger': '1.2',
@@ -54,19 +54,34 @@ def post(request, content, locale=settings.LANGUAGE_CODE):
     )
     add_env_headers(headers, env_vars)
     data = content.encode('utf8')
-    statsd.incr('wiki.ks_post')
-    with statsd.timer('wiki.ks_post'):
-        resp = requests.post(ks_url,
-                             timeout=constance.config.KUMASCRIPT_TIMEOUT,
-                             data=data,
-                             headers=headers)
+    resp = requests.post(ks_url,
+                         timeout=constance.config.KUMASCRIPT_TIMEOUT,
+                         data=data,
+                         headers=headers)
     if resp:
-        resp_body = process_body(resp)
+        resp_body = process_body(resp, use_constance_bleach_whitelists)
         resp_errors = process_errors(resp)
         return resp_body, resp_errors
     else:
         resp_errors = KUMASCRIPT_TIMEOUT_ERROR
         return content, resp_errors
+
+
+def _get_attachment_metadata_dict(attachment):
+    filesize = 0
+    try:
+        filesize = attachment.current_revision.file.size
+    except OSError:
+        pass
+    return {
+        'title': attachment.title,
+        'description': attachment.current_revision.description,
+        'filename': attachment.current_revision.filename(),
+        'size': filesize,
+        'author': attachment.current_revision.creator.username,
+        'mime': attachment.current_revision.mime_type,
+        'url': attachment.get_file_url(),
+    }
 
 
 def get(document, cache_control, base_url, timeout=None):
@@ -105,21 +120,15 @@ def get(document, cache_control, base_url, timeout=None):
         # Create the file interface
         files = []
         for attachment in document.attachments.all():
-            files.append({
-                'title': attachment.title,
-                'description': attachment.current_revision.description,
-                'filename': attachment.current_revision.filename(),
-                'size': attachment.current_revision.file.size,
-                'author': attachment.current_revision.creator.username,
-                'mime': attachment.current_revision.mime_type,
-                'url': attachment.get_file_url(),
-            })
+            files.append(_get_attachment_metadata_dict(attachment))
 
         # Assemble some KumaScript env vars
         # TODO: See dekiscript vars for future inspiration
         # http://developer.mindtouch.com/en/docs/DekiScript/Reference/
         #   Wiki_Functions_and_Variables
         path = document.get_absolute_url()
+        # TODO: Someday merge with _get_document_for_json in views.py
+        # where most of this is duplicated code.
         env_vars = dict(
             path=path,
             url=urljoin(base_url, path),
@@ -131,6 +140,8 @@ def get(document, cache_control, base_url, timeout=None):
             attachments=files,  # Just for sake of verbiage?
             slug=document.slug,
             tags=[x.name for x in document.tags.all()],
+            review_tags=[x.name for x in
+                         document.current_revision.review_tags.all()],
             modified=time.mktime(document.modified.timetuple()),
             cache_control=cache_control,
         )
@@ -144,9 +155,7 @@ def get(document, cache_control, base_url, timeout=None):
             headers['If-Modified-Since'] = c_meta[ck_modified]
 
         # Finally, fire off the request.
-        statsd.incr('wiki.ks_get')
-        with statsd.timer('wiki.ks_get'):
-            resp = requests.get(url, headers=headers, timeout=timeout)
+        resp = requests.get(url, headers=headers, timeout=timeout)
 
         if resp.status_code == 304:
             # Conditional GET was a pass, so use the cached content.
@@ -201,18 +210,15 @@ def add_env_headers(headers, env_vars):
     return headers
 
 
-def process_body(response):
-    # HACK: Assume we're getting UTF-8, which we should be.
-    # TODO: Better solution would be to upgrade the requests module
-    # in vendor from 0.6.1 to at least 0.10.6, and use resp.text,
-    # which does auto-detection. But, that will break things.
-    resp_body = response.read().decode('utf8')
+def process_body(response, use_constance_bleach_whitelists=False):
+    resp_body = response.text
 
     # We defer bleach sanitation of kumascript content all the way
     # through editing, source display, and raw output. But, we still
     # want sanitation, so it finally gets picked up here.
     from wiki.models import Document
-    return Document.objects.clean_content(resp_body)
+    return Document.objects.clean_content(resp_body,
+                                          use_constance_bleach_whitelists)
 
 
 def process_errors(response):

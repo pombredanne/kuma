@@ -1,10 +1,31 @@
-{% load i18n %}
-{# L10n: This is an email. Whitespace matters! #}
-{% blocktrans %}
-{{ creator }} created a new revision to the document
-{{ document_title }}.
+{# This is an email. Whitespace matters! #}
+{% from "includes/unsubscribe_text.ltxt" import unsubscribe_text with context %}
+{% autoescape false %}
+{% trans creator=creator, document_title=document_title %}
+{{ creator }} changed {{ document_title }}.
+{% endtrans %}
 
-To view this document's history, click the following
-link, or paste it into your browser's location bar:
-{% endblocktrans %}
-https://{{ host }}{{ url }}
+
+{# L10n: This is in an email. #}
+{{ diff|safe }}
+
+--
+{% if compare_url %}
+{% trans %}
+Compare on MDN:
+{% endtrans %}
+ https://{{ host }}{{ compare_url }}
+{% endif %}
+{% trans %}
+View Article:
+{% endtrans %}
+ https://{{ host }}{{ view_url }}
+{% trans %}
+Edit Article:
+{% endtrans %}
+ https://{{ host }}{{ edit_url }}
+{% trans %}
+Article History:
+{% endtrans %}
+ https://{{ host }}{{ history_url }}
+{{ unsubscribe_text(watch) }}{% endautoescape %}

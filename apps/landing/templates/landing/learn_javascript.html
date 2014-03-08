@@ -1,6 +1,6 @@
 {% extends "landing/base_learn.html" %}
 
-{% block pageid %}learn-js{% endblock %}
+{% block body_attributes %}id="learn-js"{% endblock %}
 
 {% block title %}{{ page_title(_('Learn JavaScript')) }}{% endblock %}
 
@@ -37,7 +37,7 @@
           <p>{{ _('What is JavaScript and how can it help you?') }}</p>
         </li>
         <li>
-          <h3 class="title"><a href="http://dev.opera.com/articles/view/programming-the-real-basics/" rel="external">Programming &ndash; The Real Basics</a></h3>
+          <h3 class="title"><a href="http://dev.opera.com/articles/view/programming-the-real-basics/" rel="external">{{ _('Programming &ndash; The Real Basics')|safe }}</a></h3>
           <h4 class="source">Dev.Opera Web</h4>
           <p>{{ _('Basic fundamentals of programming. Following articles introduce what you can do with JavaScript, best practices for using it, and more.') }}</p>
         </li>
@@ -115,7 +115,7 @@
         </li>
         <li>  
           <h3 class="title"><a href="http://stackoverflow.com/questions/394601/which-javascript-framework-jquery-vs-dojo-vs" rel="external">{{ _('Which JavaScript Framework?') }}</a></h3>
-          <h4 class="source">StackOverflow</h4>
+          <h4 class="source">Stack Overflow</h4>
           <p>{{ _('Advice on choosing a JavaScript framework.') }}</p>
         </li>
         <li>
@@ -136,7 +136,7 @@
   <section id="learn-p2pu">
     {% trans %}
     <h2>Are you tired of learning JS on your own?<br>Do you want to join a community of people who are learning JavaScript and other open web technologies?</h2>
-    <p>Consider signing up for free online peer study groups through <a href="http://p2pu.org/">Peer-to-Peer University's<span title="Peer-to-Peer University"></span></a> <a href="https://p2pu.org/en/schools/school-of-webcraft">School of Webcraft</a>. Share your discoveries, struggles, and victories with others who are learning the same things.</p>
+    <p>Consider signing up for free online peer study groups through Peer-to-Peer University's<span title="Peer-to-Peer University"></span>  <a href="https://p2pu.org/en/schools/school-of-webcraft">School of Webcraft</a>. Share your discoveries, struggles, and victories with others who are learning the same things.</p>
     {% endtrans %}
   </section>
 

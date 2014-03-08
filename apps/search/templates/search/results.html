@@ -1,53 +1,182 @@
 {# vim: set ts=2 et sts=2 sw=2: #}
 {% extends "search/base.html" %}
+{% set locale = request.GET.get('locale', request.locale) %}
+{% if locale in settings.LOCALES %}
+  {% set locale_native = settings.LOCALES[locale].native %}
+{% endif %}
 {% set meta = (('WT.oss', q),
                ('WT.oss_r', num_results)) %}
+{% block title %}
+  {% if query %}
+    {{ page_title(_('Search Results for "{query}"')|f(query=query)) }}
+  {% else %}
+    {{ page_title(_('Search')) }}
+  {% endif %}
+{% endblock %}
 
-{% block content %}
-<section id="content">
-  <div class="wrap">
-    <div id="content-main" class="full">
-<article id="search-results" class="main">
-  <div id="basic-search" class="search-refine">
-    <form role="search" method="get" action="search">
-    {% for name, field in search_form.fields.items() if not name in ('q',) %}
-      {% set list = request.GET.getlist(name) %}
-      {% for value in list %}
-        <input type="hidden" name="{{ name }}" value="{{ value }}" />
-      {% endfor %}
-    {% endfor %}
-      <input type="text" class="search-query search-refine-query" value="{{ q }}" name="q">
-      <input type="submit" class="search-refine-submit btn-large" value="{{ _('Search') }}">
-    </form>
-    <a class="show-search-tabs" href="{{ url('search') }}{{ refine_query }}">{{ _('Refine your search') }}</a>
-  </div>
+{% block bodyclass %}search-results search-results-no-demo{% endblock %}
 
-  <div class="search-count">
-    {# L10n: {n} is the number of search results, {q} is the search query, {l} is the language searched. #}
-    {{ ngettext('Found <strong>{n}</strong> result for <strong>{q}</strong> in <strong>{l}</strong>',
-                'Found <strong>{n}</strong> results for <strong>{q}</strong> in <strong>{l}</strong>',
-                num_results)|fe(n=num_results, q=q, l=lang_name) }}
-  </div>
-
-  <div class="search-results">
-
-    {% for doc in results %}
-      <div class="result {{ doc.type }}">
-        <a class="title" href="{{ doc.url|urlparams(s=q,as='s') }}">{{ doc.title }}</a>
-        <p>
-          <a href="{{ doc.url|urlparams(s=q,as='s') }}">
-            {{ doc.search_summary|safe }}
-          </a>
+{% macro doc_block(doc, index) -%}
+  <li class="result-{{ index }}">
+    <div class="column-container">
+      <div class="column-1"><i aria-hidden="true" class="icon-file-text-alt"></i></div>
+      <div class="column-5 result-list-item">
+        <h4><a href="{{ doc.url }}"{% if index == 1 %} tabindex="1"{% endif %} data-slug="{{ doc.slug }}" data-docid="{{ doc.id }}">{{ doc.title }}</a></h4>
+        <p>{{ doc.excerpt|safe }}</p>
+        <p class="search-meta"><a href="{{ doc.url }}">{{ doc.url|replace('https://', '') }}</a>
+        {% if waffle.flag('search_explanation') %}Score: <span title="explanation: {{ doc.explanation }}">{{ doc.score }}</span>{% endif%}
         </p>
       </div>
-    {% endfor %}
+      {# Hiding until search has this capability #}{#
+      <div class="column-strip result-list-link">
+        <a href=""><i aria-hidden="true" class="icon-code"></i>{{ _('Code Sample') }}</a>
+        <a href=""><i aria-hidden="true" class="icon-play-circle"></i>{{ _('Demo Sample') }}</a>
+      </div>
+      #}
+    </div>
+  </li>
+ {% endmacro %}
 
-    {{ pages|paginator }}
 
+ {% block content %}
+
+ <h1 class="offscreen">{{ _('MDN Site Search') }}</h1>
+
+  <div class="results-search-form">
+    <h2 class="offscreen">{{ _('Search') }}</h2>
+    <form action="{{ url('search') }}" method="get">
+      <label for="search-q" class="offscreen">{{ _('Search') }}</label>
+      <input type="search" name="q" id="search-q" placeholder="{{ _('Search the docs') }}" value="{{ query }}" {% if not query %}autofocus{% endif %} />
+      <button type="submit" class="offscreen">{{ _('Search') }}</button>
+    </form>
   </div>
 
-</article>
+  <div class="column-container">
+    <!-- left results -->
+    <div class="column-main">
+
+      <div id="search-results-close-container">
+        <div class="search-pane search-results-explanation">
+          <h2>{{ _('Results') }}</h2>
+          <p>
+          {% if locale_native %}
+            {% if query %}
+              {% trans count=count, locale_native=locale_native %}
+                {{ count }} document found for "{{ query }}" in {{ locale_native }}.
+              {% pluralize %}
+                {{ count }} documents found for "{{ query }}" in {{ locale_native }}.
+              {% endtrans %}
+            {% else %}
+              {% trans count=count, locale_native=locale_native %}
+                {{ count }} document found in {{ locale_native }}.
+              {% pluralize %}
+                {{ count }} documents found in {{ locale_native }}.
+              {% endtrans %}
+            {% endif %}
+          {% else %}
+            {% if query %}
+              {% trans count=count %}
+                {{ count }} document found for "{{ query }}".
+              {% pluralize %}
+                {{ count }} documents found for "{{ query }}".
+              {% endtrans %}
+            {% else %}
+              {% trans count=count %}
+                {{ count }} document found.
+              {% pluralize %}
+                {{ count }} documents found.
+              {% endtrans %}
+            {% endif %}
+          {% endif %}
+          {% if count %}
+            &middot;
+            {% if not previous and not next %}
+              {{ _('Displaying all results.') }}
+            {% else %}
+              {% trans count=count %}
+                Displaying {{ count }} search result.
+              {% pluralize %}
+                Displaying {{ start }}-{{ end }} of {{ count }} search results.
+              {% endtrans %}
+            {% endif %}
+          {% endif %}
+
+          {% if locale != settings.LANGUAGE_CODE %}
+            &middot;
+            <a href="{{ url('search', locale=settings.LANGUAGE_CODE, ) }}?q={{ query }}">
+              {% trans default_locale_native = settings.LOCALES[settings.LANGUAGE_CODE].native %}
+              Search again in {{ default_locale_native }}
+              {% endtrans %}
+            </a>
+          {% endif %}
+          </bdi></p>
+        </div>
+      </div>
+
+      {% if count %}
+      <div class="search-pane search-results-container">
+        <h3><i aria-hidden="true" class="icon-copy"></i>{{ _('Docs') }}</h3>
+
+        <ul class="result-list">
+          {% for doc in documents %}
+            {{ doc_block(doc, loop.index) }}
+          {% endfor %}
+        </ul>
+
+        <div class="search-results-more">
+
+          <div class="pager">
+            {% if previous %}
+              <a class="button" href="{{ previous }}" id="search-result-previous">
+              {{ _('Previous') }}
+              </a>
+            {% endif %}
+            {% if next %}
+              <a class="button" href="{{ next }}" id="search-result-next">
+              {{ _('Next') }}
+              </a>
+            {% endif %}
+            </div>
+
+        </div>
+      </div>
+
+      {% endif %}
     </div>
-   </div>
-</section>
+
+    {% if filters %}
+    <!-- right topics -->
+    <div class="column-strip search-results-topics">
+      {% for filter_group in filters %}
+      <h3><i aria-hidden="true" class="icon-th-list"></i>{{ filter_group.name }}</h3>
+      <ul>
+        {% for filter in filter_group.options %}
+        <li>
+        {% if filter.count == 0 %}
+        <span class="inactive"><i aria-hidden="true" class="icon-check-empty"></i> {{ filter.name }}</span>
+        {% else %}
+          {% if filter.active %}
+            <a href="{{ filter.urls.inactive }}" data-count="{{ filter.count }}" class="checked"><i aria-hidden="true" class="icon-check"></i>{{ filter.name }}</a>
+          {% else %}
+            <a href="{{ filter.urls.active }}" data-count="{{ filter.count }}"><i aria-hidden="true" class="icon-check-empty"></i>{{ filter.name }}</a>
+          {% endif %}
+        {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% endfor %}
+    </div>
+    {% endif %}
+</div>
 {% endblock %}
+
+
+{% block js %}
+  {% if waffle.flag('search_doc_navigator') and count and search_ref %}
+  <script>
+  $(document).ready(function() {
+    $('.result-list-item h4 a').mozSearchStore('{{ search_ref }}');
+  });
+  </script>
+  {% endif %}
+{% endblock js %}

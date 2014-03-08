@@ -1,8 +1,7 @@
 # This Python file uses the following encoding: utf-8
 # see also: http://www.python.org/dev/peps/pep-0263/
-import logging
 from urlparse import urljoin
-from jinja2 import escape
+from jinja2 import escape, Markup
 
 from nose.tools import eq_, ok_
 from nose.plugins.attrib import attr
@@ -13,14 +12,25 @@ import bleach
 from sumo.tests import TestCase
 import wiki.content
 from wiki.content import (CodeSyntaxFilter, DekiscriptMacroFilter,
-                          SectionTOCFilter, SectionIDFilter, IframeHostFilter,
-                          SECTION_TAGS)
+                          SectionTOCFilter, SectionIDFilter,
+                          H2TOCFilter, H3TOCFilter,
+                          SECTION_TAGS, get_seo_description,
+                          get_content_sections, extract_css_classnames,
+                          extract_html_attributes,
+                          extract_kumascript_macro_names)
 from wiki.models import ALLOWED_TAGS, ALLOWED_ATTRIBUTES, Document
-from wiki.tests import normalize_html, doc_rev, document, revision
+from wiki.tests import normalize_html, doc_rev, document
+from wiki.helpers import bugize_text
 
 
 class ContentSectionToolTests(TestCase):
     fixtures = ['test_users.json']
+
+    def test_section_pars_for_empty_docs(self):
+        doc = document(title='Doc', locale=u'fr', slug=u'doc', save=True,
+                       html='<!-- -->')
+        res = get_content_sections(doc.html)
+        eq_(type(res).__name__, 'list')
 
     def test_section_ids(self):
 
@@ -38,6 +48,12 @@ class ContentSectionToolTests(TestCase):
 
             <h1 class="header3">Header Three</h1>
             <p>test</p>
+
+            <section id="Quick_Links" class="Quick_Links">
+                <ol>
+                    <li>Hey look, quick links</li>
+                </ol>
+            </section>
         """
 
         result_src = (wiki.content
@@ -50,7 +66,8 @@ class ContentSectionToolTests(TestCase):
             ('header1', 'Header_One'),
             ('header2', 'Header_Two'),
             ('hasname', 'Constants'),
-            ('hasid',   'This_text_clobbers_the_ID'),
+            ('hasid', 'This_text_clobbers_the_ID'),
+            ('Quick_Links', 'Quick_Links'),
         )
         for cls, id in expected:
             eq_(id, result_doc.find('.%s' % cls).attr('id'))
@@ -64,6 +81,38 @@ class ContentSectionToolTests(TestCase):
             ok_(id is not None)
             ok_(id not in seen_ids)
             seen_ids.add(id)
+
+    def test_incremented_section_ids(self):
+
+        doc_src = """
+        <h1 class="header1">Header One</h1>
+        <h1>Header One</h1>
+        <h1>Header One</h1>
+        <h1>Header Two</h1>
+        <h1 name="someId">Header Two</h1>
+        """
+
+        result_src = (wiki.content
+                      .parse(doc_src)
+                      .injectSectionIDs()
+                      .serialize())
+
+        expected = """
+        <h1 class="header1" id="Header_One">Header One</h1>
+        <h1 id="Header_One_2">Header One</h1>
+        <h1 id="Header_One_3">Header One</h1>
+        <h1 id="Header_Two">Header Two</h1>
+        <h1 id="someId" name="someId">Header Two</h1>
+        """
+
+        eq_(result_src, expected)
+
+        # Ensure 1, 2 doesn't turn into 3, 4
+        result_src = (wiki.content
+                      .parse(expected)
+                      .injectSectionIDs()
+                      .serialize())
+        eq_(result_src, expected)
 
     def test_simple_implicit_section_extract(self):
         doc_src = """
@@ -345,8 +394,8 @@ class ContentSectionToolTests(TestCase):
 
     def test_non_ascii_section_headers(self):
         headers = [
-           (u'Documentation à propos de HTML',
-            'Documentation_.C3.A0_propos_de_HTML'),
+            (u'Documentation à propos de HTML',
+             'Documentation_.C3.A0_propos_de_HTML'),
             (u'Outils facilitant le développement HTML',
              'Outils_facilitant_le_d.C3.A9veloppement_HTML'),
             (u'例:\u00a0スキューと平行移動',
@@ -418,6 +467,73 @@ class ContentSectionToolTests(TestCase):
         result = (wiki.content
                   .parse(doc_src)
                   .filter(SectionTOCFilter).serialize())
+        eq_(normalize_html(expected), normalize_html(result))
+
+    @attr('toc')
+    def test_generate_toc_h2(self):
+        doc_src = """
+            <h2 id="HTML">HTML</h2>
+              <h3 id="HTML5_canvas_element">HTML5 <code>canvas</code> element</h3>
+            <h2 id="JavaScript">JavaScript</h2>
+              JavaScript is awesome.
+              <h3 id="WebGL">WebGL</h3>
+              <h3 id="Audio">Audio</h3>
+                <h4 id="Audio-API">Audio API</h4>
+            <h2 id="CSS">CSS</h2>
+                <h4 id="CSS_transforms">CSS transforms</h4>
+              <h3 id="Gradients">Gradients</h3>
+                <h4 id="Scaling_backgrounds">Scaling backgrounds</h4>
+        """
+        expected = """
+            <li><a rel="internal" href="#HTML">HTML</a>
+            </li>
+            <li><a rel="internal" href="#JavaScript">JavaScript</a>
+            </li>
+            <li><a rel="internal" href="#CSS">CSS</a>
+            </li>
+        """
+        result = (wiki.content
+                  .parse(doc_src)
+                  .filter(H2TOCFilter).serialize())
+        eq_(normalize_html(expected), normalize_html(result))
+
+    @attr('toc')
+    def test_generate_toc_h3(self):
+        doc_src = """
+            <h2 id="HTML">HTML</h2>
+              <h3 id="HTML5_canvas_element">HTML5 <code>canvas</code> element</h3>
+            <h2 id="JavaScript">JavaScript</h2>
+              JavaScript is awesome.
+              <h3 id="WebGL">WebGL</h3>
+              <h3 id="Audio">Audio</h3>
+                <h4 id="Audio-API">Audio API</h4>
+            <h2 id="CSS">CSS</h2>
+                <h4 id="CSS_transforms">CSS transforms</h4>
+              <h3 id="Gradients">Gradients</h3>
+                <h4 id="Scaling_backgrounds">Scaling backgrounds</h4>
+        """
+        expected = """
+            <li><a rel="internal" href="#HTML">HTML</a>
+                <ol>
+                  <li><a rel="internal" href="#HTML5_canvas_element">HTML5 <code>canvas</code> element</a></li>
+                </ol>
+            </li>
+            <li><a rel="internal" href="#JavaScript">JavaScript</a>
+                <ol>
+                  <li><a rel="internal" href="#WebGL">WebGL</a>
+                  <li><a rel="internal" href="#Audio">Audio</a>
+                  </li>
+                </ol>
+            </li>
+            <li><a rel="internal" href="#CSS">CSS</a>
+                <ol>
+                  <li><a rel="internal" href="#Gradients">Gradients</a>
+                </ol>
+            </li>
+        """
+        result = (wiki.content
+                  .parse(doc_src)
+                  .filter(H3TOCFilter).serialize())
         eq_(normalize_html(expected), normalize_html(result))
 
     def test_dekiscript_macro_conversion(self):
@@ -492,10 +608,9 @@ class ContentSectionToolTests(TestCase):
         try:
             result = wiki.content.filter_out_noinclude(doc_src)
             eq_('', result)
-        except e:
+        except:
             ok_(False, "There should not have been an exception")
 
-    @attr('current')
     def test_sample_code_extraction(self):
         sample_html = u"""
             <div class="foo">
@@ -585,6 +700,29 @@ class ContentSectionToolTests(TestCase):
         eq_(None, result['css'])
         eq_(None, result['js'])
 
+    def test_bug819999(self):
+        """Non-breaking spaces are turned to normal spaces in code sample
+        extraction."""
+        doc_src = """
+            <h2 id="bug819999">Bug 819999</h2>
+            <pre class="brush: css">
+            .widget select,
+            .no-widget .select {
+            &nbsp; position : absolute;
+            &nbsp; left&nbsp;&nbsp;&nbsp;&nbsp; : -5000em;
+            &nbsp; height&nbsp;&nbsp; : 0;
+            &nbsp; overflow : hidden;
+            }
+            </pre>
+        """
+        result = wiki.content.extract_code_sample('bug819999', doc_src)
+        ok_(result['css'].find(u'\xa0') == -1)
+
+    def test_bugize_text(self):
+        bad = 'Fixing bug #12345 again. <img src="http://davidwalsh.name" /> <a href="">javascript></a>'
+        good = 'Fixing <a href="https://bugzilla.mozilla.org/show_bug.cgi?id=12345" target="_blank">bug 12345</a> again. &lt;img src=&#34;http://davidwalsh.name&#34; /&gt; &lt;a href=&#34;&#34;&gt;javascript&gt;&lt;/a&gt;'
+        eq_(bugize_text(bad), Markup(good))
+
     def test_iframe_host_filter(self):
         slug = 'test-code-embed'
         embed_url = 'https://sampleserver/en-US/docs/%s$samples/sample1' % slug
@@ -603,7 +741,7 @@ class ContentSectionToolTests(TestCase):
         """ % dict(embed_url=embed_url)
 
         result_src = (wiki.content.parse(doc_src)
-                      .filterIframeHosts(['sampleserver'])
+                      .filterIframeHosts('^https?\:\/\/sampleserver')
                       .serialize())
         page = pq(result_src)
 
@@ -619,13 +757,70 @@ class ContentSectionToolTests(TestCase):
         eq_(if3.length, 1)
         eq_(if3.attr('src'), '')
 
+    def test_iframe_host_filter_invalid_host(self):
+        doc_src = """
+            <iframe id="if1" src="http://sampleserver"></iframe>
+            <iframe id="if2" src="http://testserver"></iframe>
+            <iframe id="if3" src="http://davidwalsh.name"></iframe>
+            <iframe id="if4" src="ftp://davidwalsh.name"></iframe>
+            <p>test</p>
+        """
+        result_src = (wiki.content.parse(doc_src)
+                      .filterIframeHosts('^https?\:\/\/(sample|test)server')
+                      .serialize())
+        page = pq(result_src)
+
+        eq_(page.find('#if1').attr('src'), 'http://sampleserver')
+        eq_(page.find('#if2').attr('src'), 'http://testserver')
+        eq_(page.find('#if3').attr('src'), '')
+        eq_(page.find('#if4').attr('src'), '')
+
+    def test_iframe_host_filter_youtube(self):
+        tubes = (
+            'http://www.youtube.com/embed/iaNoBlae5Qw/?feature=player_detailpage',
+            'https://youtube.com/embed/iaNoBlae5Qw/?feature=player_detailpage',
+            'https://youtube.com/sembed/'
+        )
+        doc_src = """
+            <iframe id="if1" src="%s"></iframe>
+            <iframe id="if2" src="%s"></iframe>
+            <iframe id="if3" src="%s"></iframe>
+            <p>test</p>
+        """ % tubes
+        result_src = (wiki.content.parse(doc_src)
+                                  .filterIframeHosts('^https?\:\/\/(www.)?youtube.com\/embed\/(\.*)')
+                                  .serialize())
+        page = pq(result_src)
+
+        eq_(page.find('#if1').attr('src'), tubes[0])
+        eq_(page.find('#if2').attr('src'), tubes[1])
+        eq_(page.find('#if3').attr('src'), '')
+
+    def test_iframe_host_contents_filter(self):
+        """Any contents inside an <iframe> should be removed"""
+        doc_src = """
+            <iframe>
+            <iframe src="javascript:alert(1);"></iframe>
+            </iframe>
+        """
+        expected_src = """
+            <iframe>
+            </iframe>
+        """
+        result_src = (wiki.content.parse(doc_src)
+                      .filterIframeHosts('^https?\:\/\/sampleserver')
+                      .serialize())
+        eq_(normalize_html(expected_src), normalize_html(result_src))
+
     def test_link_annotation(self):
         d, r = doc_rev("This document exists")
         d.save()
         r.save()
 
-        d2 = document(title=u'Héritée', locale=u'fr', slug=u'CSS/Héritage',
-                      save=True)
+        document(title=u'Héritée', locale=u'fr', slug=u'CSS/Héritage',
+                 save=True)
+        document(title=u'DOM/StyleSheet', locale=u'en-US',
+                 slug=u'DOM/StyleSheet', save=True)
 
         base_url = u'http://testserver/'
         vars = dict(
@@ -634,9 +829,13 @@ class ContentSectionToolTests(TestCase):
             exist_url_with_base=urljoin(base_url, d.get_absolute_url()),
             uilocale_url=u'/en-US/docs/%s/%s' % (d.locale, d.slug),
             noexist_url=u'/en-US/docs/no-such-doc',
-            noexist_url_with_base=urljoin(base_url, u'/en-US/docs/no-such-doc'),
+            noexist_url_with_base=urljoin(base_url,
+                                          u'/en-US/docs/no-such-doc'),
             noexist_uilocale_url=u'/en-US/docs/en-US/blah-blah-blah',
             nonen_slug='/fr/docs/CSS/H%c3%a9ritage',
+            tag_url='/en-US/docs/tag/foo',
+            feed_url='/en-US/docs/feeds/atom/all',
+            templates_url='/en-US/docs/templates',
         )
         doc_src = u"""
                 <li><a href="%(nonen_slug)s">Héritée</a></li>
@@ -655,6 +854,14 @@ class ContentSectionToolTests(TestCase):
                 <li><a href="http://mozilla.org/">This is an external link</a></li>
                 <li><a class="foobar" name="quux">A lack of href should not cause a problem.</a></li>
                 <li><a>In fact, a "link" with no attributes should be no problem as well.</a></li>
+                <a href="%(tag_url)s">Tag link</a>
+                <a href="%(feed_url)s">Feed link</a>
+                <a href="%(templates_url)s">Templates link</a>
+                <a href="/en-US/docs/DOM/stylesheet">Case sensitive 1</a>
+                <a href="/en-US/docs/DOM/Stylesheet">Case sensitive 1</a>
+                <a href="/en-US/docs/DOM/StyleSheet">Case sensitive 1</a>
+                <a href="/en-us/docs/dom/StyleSheet">Case sensitive 1</a>
+                <a href="/en-US/docs/dom/Styles">For good measure</a>
         """ % vars
         expected = u"""
                 <li><a href="%(nonen_slug)s">Héritée</a></li>
@@ -673,6 +880,14 @@ class ContentSectionToolTests(TestCase):
                 <li><a class="external" href="http://mozilla.org/">This is an external link</a></li>
                 <li><a class="foobar" name="quux">A lack of href should not cause a problem.</a></li>
                 <li><a>In fact, a "link" with no attributes should be no problem as well.</a></li>
+                <a href="%(tag_url)s">Tag link</a>
+                <a href="%(feed_url)s">Feed link</a>
+                <a href="%(templates_url)s">Templates link</a>
+                <a href="/en-US/docs/DOM/stylesheet">Case sensitive 1</a>
+                <a href="/en-US/docs/DOM/Stylesheet">Case sensitive 1</a>
+                <a href="/en-US/docs/DOM/StyleSheet">Case sensitive 1</a>
+                <a href="/en-us/docs/dom/StyleSheet">Case sensitive 1</a>
+                <a class="new" href="/en-US/docs/dom/Styles">For good measure</a>
         """ % vars
 
         # Split the markup into lines, to better see failures
@@ -686,6 +901,92 @@ class ContentSectionToolTests(TestCase):
                           .serialize())
             eq_(normalize_html(expected_line), normalize_html(result_line))
 
+    @attr('bug821986')
+    def test_editor_safety_filter(self):
+        """Markup that's hazardous for editing should be stripped"""
+        doc_src = """
+            <svg><circle onload=confirm(3)>
+            <h1 class="header1">Header One</h1>
+            <p>test</p>
+            <section>
+                <h1 class="header2">Header Two</h1>
+                <p>test</p>
+            </section>
+            <h1 class="header3">Header Three</h1>
+            <p>test</p>
+        """
+        expected_src = """
+            <svg><circle>
+            <h1 class="header1">Header One</h1>
+            <p>test</p>
+            <section>
+                <h1 class="header2">Header Two</h1>
+                <p>test</p>
+            </section>
+            <h1 class="header3">Header Three</h1>
+            <p>test</p>
+        """
+        result_src = (wiki.content.parse(doc_src)
+                      .filterEditorSafety()
+                      .serialize())
+        eq_(normalize_html(expected_src), normalize_html(result_src))
+
+    def test_ignore_heading_section_extract(self):
+        doc_src = """
+            <p>test</p>
+            <h1 id="s4">Head 4</h1>
+            <p>test</p>
+            <h2 id="s4-1">Head 4-1</h2>
+            <p>test</p>
+            <h3 id="s4-2">Head 4-1-1</h3>
+            <p>test s4-2</p>
+            <h1 id="s4-next">Head</h1>
+            <p>test</p>
+        """
+        expected = """
+            <p>test</p>
+            <h3 id="s4-2">Head 4-1-1</h3>
+            <p>test s4-2</p>
+        """
+        result = (wiki.content
+                  .parse(doc_src)
+                  .extractSection(id="s4-1", ignore_heading=True)
+                  .serialize())
+        eq_(normalize_html(expected), normalize_html(result))
+
+    def test_ignore_heading_section_replace(self):
+        doc_src = """
+            <h1 id="s1">Head 1</h1>
+            <p>test</p>
+            <p>test</p>
+            <h1 id="s2">Head 2</h1>
+            <p>test</p>
+            <p>test</p>
+            <h1 id="s3">Head 3</h1>
+            <p>test</p>
+            <p>test</p>
+        """
+        replace_src = """
+            <p>replacement worked yay hooray</p>
+        """
+        expected = """
+            <h1 id="s1">Head 1</h1>
+            <p>test</p>
+            <p>test</p>
+            <h1 id="s2">Head 2</h1>
+            <p>replacement worked yay hooray</p>
+            <h1 id="s3">Head 3</h1>
+            <p>test</p>
+            <p>test</p>
+        """
+        result = (wiki.content
+                  .parse(doc_src)
+                  .replaceSection(id="s2",
+                                  replace_src=replace_src,
+                                  ignore_heading=True)
+                  .serialize())
+        eq_(normalize_html(expected), normalize_html(result))
+
 
 class AllowedHTMLTests(TestCase):
     simple_tags = (
@@ -696,7 +997,7 @@ class AllowedHTMLTests(TestCase):
         'mark', 'time', 'meter', 'output', 'progress',
         'audio', 'details', 'datagrid', 'datalist', 'table',
         'address'
-        )
+    )
 
     unclose_tags = ('img', 'input', 'br', 'command')
 
@@ -706,7 +1007,7 @@ class AllowedHTMLTests(TestCase):
 
     special_attributes = (
         '<command id="foo">',
-        '<img align="left" alt="picture of foo" class="foo" id="foo" src="foo" title="foo">',
+        '<img align="left" alt="picture of foo" class="foo" dir="rtl" id="foo" src="foo" title="foo">',
         '<a class="foo" href="foo" id="foo" title="foo">foo</a>',
         '<div class="foo">foo</div>',
         '<video class="movie" controls id="some-movie" lang="en-US" src="some-movie.mpg">Fallback</video>'
@@ -744,3 +1045,163 @@ class AllowedHTMLTests(TestCase):
         for html_str in self.special_attributes:
             eq_(html_str, bleach.clean(html_str, attributes=ALLOWED_ATTRIBUTES,
                                        tags=ALLOWED_TAGS))
+
+    def test_stripped_ie_comment(self):
+        """bug 801046: strip IE conditional comments"""
+        content = """
+            <p>Hi there.</p>
+            <!--[if]><script>alert(1)</script -->
+            <!--[if<img src=x onerror=alert(2)//]> -->
+            <p>Goodbye</p>
+        """
+        expected = """
+            <p>Hi there.</p>
+            <p>Goodbye</p>
+        """
+        result = Document.objects.clean_content(content)
+        eq_(normalize_html(expected), normalize_html(result))
+
+
+class SearchParserTests(TestCase):
+    """Tests for document parsers that extract content for search indexing"""
+
+    def test_css_classname_extraction(self):
+        expected = ('foobar', 'barfoo', 'bazquux')
+        content = """
+            <p class="%s">Test</p>
+            <p class="%s">Test</p>
+            <div class="%s">Test</div>
+        """ % expected
+        result = extract_css_classnames(content)
+        eq_(sorted(expected), sorted(list(result)))
+
+    def test_html_attribute_extraction(self):
+        expected = (
+            'class="foobar"',
+            'id="frazzy"',
+            'data-boof="farb"'
+        )
+        content = """
+            <p %s>Test</p>
+            <p %s>Test</p>
+            <div %s>Test</div>
+        """ % expected
+        result = extract_html_attributes(content)
+        eq_(sorted(expected), sorted(list(result)))
+
+    def test_kumascript_macro_extraction(self):
+        expected = ('foobar', 'barfoo', 'bazquux', 'banana')
+        content = """
+            <p>{{ %s }}</p>
+            <p>{{ %s("foo", "bar", "baz") }}</p>
+            <p>{{ %s    ("quux") }}</p>
+            <p>{{%s}}</p>
+        """ % expected
+        result = extract_kumascript_macro_names(content)
+        eq_(sorted(expected), sorted(list(result)))
+
+
+class GetSEODescriptionTests(TestCase):
+
+    def test_summary_section(self):
+        content = (
+            '<h2 id="Summary">Summary</h2><p>The <strong>Document Object '
+            'Model'
+            '</strong> (<strong>DOM</strong>) is an API for '
+            '<a href="/en-US/docs/HTML" title="en-US/docs/HTML">HTML</a> and '
+            '<a href="/en-US/docs/XML" title="en-US/docs/XML">XML</a> '
+            'documents. It provides a structural representation of the '
+            'document, enabling you to modify its content and visual '
+            'presentation by using a scripting language such as '
+            '<a href="/en-US/docs/JavaScript" '
+            'title="https://developer.mozilla.org/en-US/docs/JavaScript">'
+            'JavaScript</a>.</span></p>')
+        expected = (
+            'The Document Object Model (DOM) is an API for HTML and '
+            'XML documents. It provides a structural representation of the'
+            ' document, enabling you to modify its content and visual'
+            ' presentation by using a scripting language such as'
+            ' JavaScript.')
+        eq_(expected, get_seo_description(content, 'en-US'))
+
+    def test_keep_markup(self):
+        content = """
+            <h2 id="Summary">Summary</h2>
+            <p>The <strong>Document Object Model </strong>
+            (<strong>DOM</strong>) is an API for <a href="/en-US/docs/HTML"
+            title="en-US/docs/HTML">HTML</a> and <a href="/en-US/docs/XML"
+            title="en-US/docs/XML">XML</a> documents. It provides a structural
+            representation of the document, enabling you to modify its content
+            and visual presentation by using a scripting language such as <a
+            href="/en-US/docs/JavaScript"
+            title="https://developer.mozilla.org/en-US/docs/JavaScript">
+            JavaScript</a>.</span></p>
+         """
+        expected = """
+            The <strong>Document Object Model </strong>
+            (<strong>DOM</strong>) is an API for <a href="/en-US/docs/HTML"
+            title="en-US/docs/HTML">HTML</a> and <a href="/en-US/docs/XML"
+            title="en-US/docs/XML">XML</a> documents. It provides a structural
+            representation of the document, enabling you to modify its content
+            and visual presentation by using a scripting language such as <a
+            href="/en-US/docs/JavaScript"
+            title="https://developer.mozilla.org/en-US/docs/JavaScript">
+            JavaScript</a>.</span>
+        """
+        eq_(normalize_html(expected),
+            normalize_html(get_seo_description(content, 'en-US', False)))
+
+    def test_html_elements_spaces(self):
+        # No spaces with html tags
+        content = (u'<p><span class="seoSummary">The <strong>Document Object '
+             'Model'
+             '</strong> (<strong>DOM</strong>) is an API for '
+             '<a href="/en-US/docs/HTML" title="en-US/docs/HTML">HTML</a> and '
+             '<a href="/en-US/docs/XML" title="en-US/docs/XML">XML</a> '
+             'documents. It provides a structural representation of the '
+             'document, enabling you to modify its content and visual '
+             'presentation by using a scripting language such as '
+             '<a href="/en-US/docs/JavaScript" '
+             'title="https://developer.mozilla.org/en-US/docs/JavaScript">'
+             'JavaScript</a>.</span></p>')
+        expected = ('The Document Object Model (DOM) is an API for HTML and '
+            'XML'
+            ' documents. It provides a structural representation of the'
+            ' document, enabling you to modify its content and visual'
+            ' presentation by using a scripting language such as'
+            ' JavaScript.')
+        eq_(expected, get_seo_description(content, 'en-US'))
+
+        content = (u'<p><span class="seoSummary"><strong>Cascading Style '
+                   'Sheets</strong>, most of the time abbreviated in '
+                   '<strong>CSS</strong>, is a '
+                   '<a href="/en-US/docs/DOM/stylesheet">stylesheet</a> '
+                   'language used to describe the presentation of a document '
+                   'written in <a href="/en-US/docs/HTML" title="The '
+                   'HyperText Mark-up Language">HTML</a></span> or <a '
+                   'href="/en-US/docs/XML" title="en-US/docs/XML">XML</a> '
+                   '(including various XML languages like <a '
+                   'href="/en-US/docs/SVG" title="en-US/docs/SVG">SVG</a> or '
+                   '<a href="/en-US/docs/XHTML" '
+                   'title="en-US/docs/XHTML">XHTML</a>)<span '
+                   'class="seoSummary">. CSS describes how the structured '
+                   'element must be rendered on screen, on paper, in speech, '
+                   'or on other media.</span></p>')
+        expected = ('Cascading Style Sheets, most of the time abbreviated in '
+                    'CSS, is a stylesheet language used to describe the '
+                    'presentation of a document written in HTML. CSS '
+                    'describes how the structured element must be rendered on '
+                    'screen, on paper, in speech, or on other media.')
+        eq_(expected, get_seo_description(content, 'en-US'))
+
+    def test_empty_paragraph_content(self):
+        content = u'''<p></p><div class="overheadIndicator draft draftHeader">
+            <strong>DRAFT</strong>
+                <div>This page is not complete.</div>
+                </div><p></p>
+                <p></p><div class="note"><strong>Note:</strong> Please do not
+                translate this page until it is done; it will be much easier at
+                that point. The French translation is a test to be sure that it
+                works well.</div><p></p>'''
+        expected = ('')
+        eq_(expected, get_seo_description(content, 'en-US', False))

@@ -12,24 +12,13 @@ from django.utils.http import int_to_base36
 import mock
 from nose import SkipTest
 from nose.tools import eq_
-from nose.plugins.attrib import attr
 from pyquery import PyQuery as pq
-from test_utils import RequestFactory
-
-import constance.config
-from dekicompat.tests import (SINGLE_ACCOUNT_FIXTURE_XML,
-                              mock_post_mindtouch_user,
-                              mock_put_mindtouch_user,
-                              mock_get_deki_user_by_email,
-                              mock_get_deki_user)
-from dekicompat.backends import DekiUserBackend, MINDTOUCH_USER_XML
 
 from sumo.urlresolvers import reverse
 from sumo.helpers import urlparams
 from sumo.tests import post
 from users.models import RegistrationProfile
 from users.tests import TestCaseBase
-from users.views import _clean_next_url, SESSION_VERIFIED_EMAIL
 
 
 class LoginTests(TestCaseBase):
@@ -99,8 +88,7 @@ class LoginTests(TestCaseBase):
         response = self.client.get(urlparams(reverse('demos_submit')))
         eq_(200, response.status_code)
         doc = pq(response.content)
-        eq_(next, doc('#masthead input[name="next"]')[0].attrib['value'])
-        eq_(next, doc('#site-info input[name="next"]')[0].attrib['value'])
+        eq_(next, doc('#main-header input[name="next"]')[0].attrib['value'])
 
         # user login page - someone logged-out clicks edit
         next = '/en-US/docs/Testing$edit'
@@ -109,17 +97,6 @@ class LoginTests(TestCaseBase):
         eq_(200, response.status_code)
         doc = pq(response.content)
         eq_(next, doc('input[name="next"]')[0].attrib['value'])
-
-    @mock.patch_object(Site.objects, 'get_current')
-    def test_clean_url(self, get_current):
-        '''Verify that protocol and domain get removed.'''
-        get_current.return_value.domain = 'su.mo.com'
-        r = RequestFactory().post('/users/login',
-                                  {'next': 'https://su.mo.com/kb/new?f=b'})
-        eq_('/kb/new?f=b', _clean_next_url(r))
-        r = RequestFactory().post('/users/login',
-                                  {'next': 'http://su.mo.com/kb/new'})
-        eq_('/kb/new', _clean_next_url(r))
 
     @mock.patch_object(Site.objects, 'get_current')
     def test_login_invalid_next_parameter(self, get_current):
@@ -202,78 +179,11 @@ class PasswordReset(TestCaseBase):
         assert mail.outbox[0].subject.find('Password reset') == 0
         assert mail.outbox[0].body.find('pwreset/%s' % self.uidb36) > 0
 
-    @mock_get_deki_user
-    @mock_get_deki_user_by_email
-    @mock.patch_object(Site.objects, 'get_current')
-    def test_deki_only_user(self, get_current):
-        if not settings.DEKIWIKI_ENDPOINT:
-            # Skip, if MindTouch API unavailable
-            raise SkipTest()
-
-        get_current.return_value.domain = 'testserver.com'
-        self.assertRaises(User.DoesNotExist, User.objects.get,
-                          username='testaccount')
-
-        if not getattr(settings, 'DEKIWIKI_MOCK', False):
-            # HACK: Ensure that expected user details are in MindTouch when not
-            # mocking the API
-            mt_email = 'testaccount@testaccount.com'
-            user_xml = MINDTOUCH_USER_XML % dict(username="testaccount",
-                    email=mt_email, fullname="None", status="active",
-                    language="", timezone="-08:00", role="Contributor")
-            DekiUserBackend.put_mindtouch_user(deki_user_id='=testaccount',
-                                               user_xml=user_xml)
-            passwd_url = '%s/@api/deki/users/%s/password?apikey=%s' % (
-                settings.DEKIWIKI_ENDPOINT, '=testaccount',
-                settings.DEKIWIKI_APIKEY)
-            requests.put(passwd_url, data='theplanet')
-
-        r = self.client.post(reverse('users.pw_reset'),
-                             {'email': 'testaccount@testaccount.com'})
-        eq_(302, r.status_code)
-        eq_('http://testserver/en-US/users/pwresetsent', r['location'])
-        eq_(1, len(mail.outbox))
-        assert mail.outbox[0].subject.find('Password reset') == 0
-
-        u = User.objects.get(username='testaccount')
-        assert mail.outbox[0].body.find('pwreset/%s' % int_to_base36(u.id)) > 0
-
-    @mock.patch_object(Site.objects, 'get_current')
-    def test_deki_email_multi_user(self, get_current):
-        if not settings.DEKIWIKI_ENDPOINT:
-            # Skip, if MindTouch API unavailable
-            raise SkipTest()
-
-        get_current.return_value.domain = 'testserver.com'
-        self.assertRaises(User.DoesNotExist, User.objects.get,
-                          username='Ibn el haithem')
-
-        r = self.client.post(reverse('users.pw_reset'),
-            {'email': 'f487e0b2f7b637e4e7d5dd0ff76b0447@mozilla.com'})
-        eq_(302, r.status_code)
-        eq_('http://testserver/en-US/users/pwresetsent', r['location'])
-        eq_(1, len(mail.outbox))
-        assert mail.outbox[0].subject.find('Password reset') == 0
-
-        u = User.objects.get(username='Ibn el haithem')
-        assert mail.outbox[0].body.find('pwreset/%s' % int_to_base36(u.id)) > 0
-
-    test_deki_email_multi_user = mock_get_deki_user_by_email(
-        test_deki_email_multi_user,
-        fixture_file=SINGLE_ACCOUNT_FIXTURE_XML)
-
-    test_deki_email_multi_user = mock_get_deki_user(
-        test_deki_email_multi_user,
-        fixture_file=SINGLE_ACCOUNT_FIXTURE_XML)
-
     def _get_reset_url(self):
         return reverse('users.pw_reset_confirm',
                        args=[self.uidb36, self.token])
 
     def test_bad_reset_url(self):
-        r = self.client.get('/users/pwreset/junk/', follow=True)
-        eq_(r.status_code, 404)
-
         r = self.client.get(reverse('users.pw_reset_confirm',
                                     args=[self.uidb36, '12-345']))
         eq_(200, r.status_code)
@@ -349,9 +259,6 @@ class PasswordChangeTests(TestCaseBase):
 
 
 class ResendConfirmationTests(TestCaseBase):
-
-    @mock_post_mindtouch_user
-    @mock_put_mindtouch_user
     @mock.patch_object(Site.objects, 'get_current')
     def test_resend_confirmation(self, get_current):
         get_current.return_value.domain = 'testserver.com'

@@ -3,6 +3,16 @@
 	"locking in" a value
 */
 (function($) {
+
+	// Move the suggestion list when the page scrolls and the list is open
+	function openCloseScroll(event) {
+		return function() {
+			var self = this;
+			$(window)[event]("scroll", function() {
+				$(self).mozillaAutocomplete("reposition");
+			});
+		};
+	}
 	
     /*
 		Customized autocomplete that provides:
@@ -36,7 +46,9 @@
 			// Allow overriding of "_renderItem" method
 			_renderItem: null,
 			// Show items as anchors with title attributes
-			_renderItemAsLink: false
+			_renderItemAsLink: false,
+			open: openCloseScroll("bind"),
+			close: openCloseScroll("unbind")
 		},
 		
 		// Create a cache - make this a 
@@ -164,8 +176,6 @@
 					
 					// Trigger a new AJAX request to find the results
 					self.lastXHR = $.getJSON(self.options.autocompleteUrl, request, function(data, status, xhr) {
-						var labelField = self.options.labelField;
-						
 						// Message the data
 						assignLabel(data);
 						
@@ -187,16 +197,18 @@
 			this.options.select = function(event, ui, isSilent) {
 				// Set the selection
 				var selection = self.selection = ui.item;
-				// Call the select method if present
-				if(select) select.call(self, event, ui);
-				// Set the INPUT element's value to the item value
-				self.element.val(selection.value);
-				// Add the valid class
-				self.updateStyles(true);
-				// Set the title attribute
-				self.element.attr("title", gettext("Selected: ") + self.selection.label);
-				// Call onSelect for callback purposes
-				self.options.onSelect(selection, isSilent);
+				if(selection.value != undefined) {
+						// Call the select method if present
+					if(select) select.call(self, event, ui);
+					// Set the INPUT element's value to the item value
+					if(selection) self.element.val(selection.value);
+					// Add the valid class
+					self.updateStyles(true);
+					// Set the title attribute
+					self.element.attr("title", gettext("Selected: ") + self.selection.label);
+					// Call onSelect for callback purposes
+					self.options.onSelect(selection, isSilent);
+				}
 			};
 			
 			// Add keyup event so that if they don't select from the 
@@ -218,7 +230,6 @@
 				if(e && e.keyCode == 13) {
 					e.preventDefault();
 					e.stopPropagation();
-					
 					if(lookup) {
 						self.options.select.call(self, e, { item: self.selection });
 					}
@@ -255,12 +266,11 @@
 				self._renderItem = function(list, item) {
 					return $("<li></li>")
 					        .data("item.autocomplete", item)
-					        .attr("title", item.href)
+					        .attr("title", item.url)
 					        .append($("<a></a>").text(item.label))
 					        .appendTo(list);
 				}
 			}
-			
 		},
 		
 		reposition: function() {

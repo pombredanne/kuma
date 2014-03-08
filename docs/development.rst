@@ -1,36 +1,55 @@
-============
+===========
 Development
-============
+===========
 
-After you have completed the `manual installation steps <installation.rst>`_
-or set up the `Vagrant-managed VM <installation-vagrant.rst>`_), and are able
-to run Kuma using ``./manage.py runserver``, you can start contributing.
+We strongly suggest using a :doc:`Vagrant-managed VM <installation-vagrant>` if you can.
+Or, you can use the :doc:`manual installation steps <installation>`.
 
-Running Kuma
-============
+Running Kuma in Vagrant VM
+==========================
 
-In addition to running the django app using ``./manage.py runserver``, you can run
-the kumascript service to enable wiki templates processing::
+If you are using a :doc:`Vagrant-managed VM <installation-vagrant>`, you can start all
+Kuma servers and services with::
+
+    vagrant ssh
+    foreman start
+
+Running Kuma manually
+=====================
+
+If you are using :doc:`manual installation <installation>`, you can run the django server with::
+
+    ./manage.py runserver
+
+and the kumascript service with::
 
     node kumascript/run.js
 
-...and `celery <celery.rst>`_ to enable background task processing (such as sending
-the e-mail notifications).
-Note that, before running the kumascript, you need to install the node.js ``fibers`` module
+Note: Before running kumascript, you need to install the node.js ``fibers`` module
 by running ``npm install fibers``.
 
+
 Log in
-------
+======
 
 You can log into the wiki using Persona or via the django admin interface.
 If you use the admin interface, you can log in as the user you created during installation
 or on the vagrant VM use login ``admin`` with password ``admin``.
 
 Set up permissions
-------------------
+==================
 
 Some features are only available to privileged users. To manage permissions use the
 Auth -> Users section of the django admin interface.
+
+Compiling Stylus Files
+======================
+
+If you're updating the Stylus CSS files, you'll need to compile them before you can see your updates within the browser.  To compile stylus files, run the following from the command line::
+
+	./scripts/compile-stylesheets
+
+The relevant CSS files will be generated and placed within the `media/redesign/css` directory. You can add a ``-w`` flag to that call to compile stylesheets upon save.
 
 Hacking on bleeding edge features
 =================================
@@ -71,12 +90,7 @@ Note that this will try (and fail) to run tests that depend on apps disabled
 via ``INSTALLED_APPS``. You should run a subset of tests specified in
 `scripts/build.sh <../scripts/build.sh>`_, at the bottom of the script.
 
-When using the vagrant VM you must `run the tests from the root folder`_, not from
-``/vagrant``::
-
-    (cd / && /vagrant/manage.py test ...)
-
-For more information, see the `test documentation <tests.rst>`_.
+For more information, see the :doc:`test documentation <tests>`.
 
 .. _run the tests from the root folder: https://bugzilla.mozilla.org/show_bug.cgi?id=756536#c2
 
@@ -86,3 +100,15 @@ Kumascript tests
 If you're changing Kumascript, be sure to run its tests too.
 See https://github.com/mozilla/kumascript
 
+Coding Conventions
+==================
+
+Tests
+-----
+
+* Avoid naming test files ``test_utils.py``, since we use a library with the
+  same name. Use ``test__utils.py`` instead.
+
+* If you're expecting ``reverse`` to return locales in the URL, use
+  ``LocalizingClient`` instead of the default client for the ``TestCase``
+  class.

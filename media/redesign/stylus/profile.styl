@@ -1,0 +1,207 @@
+/*
+  Used within the devmo django app
+*/
+
+@import 'includes/vars'
+@import 'includes/mixins'
+
+beta-spacing = (grid-spacing * 2.5);
+
+.profile {
+
+  /* off-settings some old styles for now */
+  #profile-head {
+    background: light-background-color;
+    border-color: header-background-color;
+  }
+
+  table.activity thead, table.activity tfoot {
+    background: header-background-color;
+  }
+
+  table.activity tr:nth-child(2n), .gallery-foot {
+    background: light-background-color;
+  }
+
+  table.activity th h3 {
+    font-size: base-bump-font-size;
+  }
+
+  .submission .fm-submit button {
+    box-shadow: inherit;
+  }
+
+  h1 {
+      letter-spacing: 0;
+  }
+}
+
+/* just for the display page (not the edit page) */
+.profile-display {
+
+  #profile-head {
+    min-height: 200px;
+
+    .main {
+      float: none;
+      width: auto;
+      margin-left: 150px;
+    }
+
+    .links {
+      display: table;
+      border-spacing: (grid-spacing / 2);
+      margin: -(@border-spacing); // Offset outer border
+
+      li {
+        display: table-row;
+      }
+
+      i, a {
+        display: table-cell;
+        vertical-align: middle;
+      }
+
+      i {
+        font-size: 14px;
+        text-align: center;
+      }
+
+      a {
+        compat-only(background, none);
+        padding: 0;
+      }
+    }
+
+    .edit {
+      & > a {
+        compat-only(margin, 0 5px 0 0);
+      }
+    }
+
+    .submenu {
+      @extend $advanced-menu;
+
+      a {
+       compat-only(float, none);
+       compat-only(margin, 0);
+     }
+   }
+  }
+}
+
+/* API key pages */
+.profile-api-page {
+  label {
+    display: block; 
+  }
+
+  #section-head { /* this can all be removed after launch */
+    compat-only(background, none);
+    compat-only(border-bottom, none);
+    compat-only(border-top, none);
+    compat-only(color, inherit);
+    compat-only(text-shadow, none);
+    compat-only(box-shadow, none);
+    compat-only(padding, 0);
+    compat-only(margin-top, 0);
+
+    h1 {
+      heading-1();
+      compat-only(width, auto);
+      compat-only(float, none);
+      compat-only(margin, 0);
+
+      b {
+        heading-1();
+        compat-only(display, inline);
+        compat-only(margin-top, 0);
+        compat-only(color, inherit);
+      }
+    }
+  }
+}
+
+/* profile editing */
+#profile-edit {
+    padding-left: 0;
+    .section li > input[type="text"], select, textarea, #tagit-interests, #tags-expertise {
+        vendorize(box-sizing, border-box);
+        width: 100%;
+    }
+}
+
+#elsewhere {
+    label {
+        compat-only(background, none);
+        compat-only(padding-left, 0);
+    }
+}
+
+/* Profile edit newsletter */
+.profile-newsletter-container {
+  background: #f4f7f8;
+  padding: grid-spacing;
+  overflow: hidden;
+
+  .fm-submit {
+    margin-top: 0;
+    margin-bottom: 0;
+  }
+
+  select {
+    width: 80%;
+  }
+}
+
+#field_beta {
+    @extend $checkbox-label-container;
+}
+
+/* For tablet and lower, move the profile buttons below the user name */
+@media media-query-tablet {
+  #profile-head {
+    .edit {
+      display: inline-block;
+      position: relative;
+      top: auto;
+      right: auto;
+      margin: 0 0 grid-spacing 0;
+
+      a {
+        float: none;
+        display: inline-block;
+        margin: 0 10px 0 0;
+      }
+    }
+  }
+
+  .profile-newsletter-container {
+    padding-bottom: 0;
+    margin-bottom: (grid-spacing * 1.5);
+
+    .fm-submit {
+      display: none;
+    }
+  }
+}
+
+@media media-query-small-mobile {
+  .profile-display #profile-head .edit {
+    margin: 0;
+
+    & > a {
+      display: block;
+      text-align: center;
+      override-compat-important(margin, (grid-spacing / 2) 0);
+    }
+
+    #edit-profile i {
+      display: none;
+    }
+
+    .submenu {
+      top: 90px;
+    }
+  }
+}

@@ -11,6 +11,11 @@ from django.conf import settings
 from devmo.helpers import devmo_url
 from devmo import urlresolvers
 
+from devmo.context_processors import next_url
+from django.core.handlers.wsgi import WSGIRequest
+from django.contrib.auth.models import AnonymousUser
+from StringIO import StringIO
+
 
 def parse_robots(base_url):
     """ Given a base url, retrieves the robot.txt file and
@@ -35,6 +40,15 @@ def parse_robots(base_url):
             rules.append(rule)
         token = robots.get_token()
     return rules
+
+
+def _make_request(path):
+        req = WSGIRequest({
+            'REQUEST_METHOD': 'GET',
+            'PATH_INFO': path,
+            'wsgi.input': StringIO()})
+        req.user = AnonymousUser()
+        return req
 
 
 class TestDevMoRobots(test_utils.TestCase):
@@ -78,7 +92,7 @@ class TestDevMoRobots(test_utils.TestCase):
 
 
 class TestDevMoHelpers(test_utils.TestCase):
-    fixtures = ['wiki/documents.json']
+    fixtures = ['test_users.json', 'wiki/documents.json']
 
     def test_devmo_url(self):
 
@@ -96,29 +110,6 @@ class TestDevMoHelpers(test_utils.TestCase):
         eq_(devmo_url(context, localized_page), '/de/HTML')
         req.locale = 'zh-TW'
         eq_(devmo_url(context, localized_page), '/zh_tw/HTML')
-
-    def test_devmo_url_mindtouch_disabled(self):
-        _old = settings.DEKIWIKI_ENDPOINT
-        settings.DEKIWIKI_ENDPOINT = False
-
-        localized_page = 'article-title'
-        req = test_utils.RequestFactory().get('/')
-        context = {'request': req}
-
-        req.locale = 'fr'
-        eq_(devmo_url(context, localized_page), '/fr/docs/le-title')
-
-        settings.DEKIWIKI_ENDPOINT = _old
-
-    def test_devmo_url_mindtouch_disabled_redirect(self):
-        # Skipping this test for now, redirect model logic is coupled to view
-        raise SkipTest()
-        _old = settings.DEKIWIKI_ENDPOINT
-        settings.DEKIWIKI_ENDPOINT = False
-
-        # TODO: add redirect localized pages to fixture and test
-
-        settings.DEKIWIKI_ENDPOINT = _old
 
 
 class TestDevMoUrlResolvers(test_utils.TestCase):
@@ -141,3 +132,16 @@ class TestDevMoUrlResolvers(test_utils.TestCase):
         req.META['HTTP_ACCEPT_LANGUAGE'] = 'fr'
         prefixer = urlresolvers.Prefixer(req)
         eq_(prefixer.get_language(), 'fr')
+
+
+class TestDevMoNextUrl(test_utils.TestCase):
+    """ Tests that the next_url value is properly set, 
+    including query string """
+    def test_basic(self):
+        path = '/one/two'
+        eq_(next_url(_make_request(path))['next_url'], path)
+
+    def test_querystring(self):
+        path = '/one/two?something'
+        req = _make_request(path)
+        eq_(next_url(_make_request(path))['next_url'], path)

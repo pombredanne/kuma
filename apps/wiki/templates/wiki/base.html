@@ -3,16 +3,14 @@
 
 {% block site_css %}
     {{ super() }}
-    {{ css('wiki-print', media='print') }}
+    {{ css('wiki', 'all') }}
+
     {% if config.KUMA_CUSTOM_CSS_PATH %}
       <link rel="stylesheet" type="text/css"
             href="{{ config.KUMA_CUSTOM_CSS_PATH }}?raw=1" />
     {% endif %}
 {% endblock %}
 
-{% if not styles %}
-  {% set styles = ('wiki',) %}
-{% endif %}
 {% if not scripts %}
   {% set scripts = ('wiki',) %}
 {% endif %}

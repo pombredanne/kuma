@@ -3,7 +3,7 @@ Installation
 ============
 
 This page describes the manual installation procedure. If you can, you
-should set up the `vagrant-managed virtual machine <installation-vagrant.rst>`_
+should set up the :doc:`vagrant-managed virtual machine <installation-vagrant>`
 instead.
 
 Requirements
@@ -21,8 +21,7 @@ following things (in addition to Git, of course).
 
 * Memcached Server and ``libmemcached``.
 
-* `Sphinx <http://sphinxsearch.com/>`_ 0.9.9, compiled with the
-  ``--enable-id64`` flag.
+* `Elasticsearch <http://elasticsearch.org/>`_ 0.90.9.
 
 * RabbitMQ.
 
@@ -35,6 +34,8 @@ following things (in addition to Git, of course).
 * ``zlib`` and headers.
 
 * ``libmagic`` and headers.
+
+* ``libtidy`` and headers
 
 * Several Python packages. See `Installing the Packages`_.
 
@@ -52,7 +53,7 @@ it's more like our production environment) you'll also need:
 
 * ``mod_wsgi``
 
-See the documentation on `WSGI <wsgi.rst>`_ for more information and
+See the documentation on :doc:`WSGI <wsgi>` for more information and
 instructions.
 
 
@@ -62,9 +63,9 @@ Getting the Source
 First, to follow the instructions from `Webdev Bootcamp <http://mozweb.readthedocs.org/en/latest/git.html#working-on-projects>`_,
 fork the project into your own account. Then get the source using::
 
-    mkdir mdn # you probably want to do this, since you'll have to create 
+    mkdir mdn # you probably want to do this, since you'll have to create
     cd mdn    # product_details_json/ as a sibling of kuma/ later.
-    git clone git://github.com/<your_account>/kuma.git
+    git clone git@github.com:<your_username>/kuma.git
     cd kuma
     git submodule update --init --recursive
 
@@ -158,6 +159,13 @@ set your ``settings_local.py`` with the following::
     TEMPLATE_DEBUG = DEBUG
     SERVE_MEDIA = True
 
+Setting ``DEBUG = False`` will put the installation in production mode
+and ask for minified assets. In that case, you will need to generate
+CSS from stylus and compress resource::
+
+    ./scripts/compile-stylesheets
+    ./manage.py compress_assets
+
 Configure Persona
 -------------------
 
@@ -174,6 +182,15 @@ development instance::
 The ``SESSION_EXPIRE_AT_BROWSER_CLOSE`` setting is not strictly necessary, but
 it's convenient for development.
 
+Secure Cookies
+--------------
+
+To prevent error messages like ``Forbidden (CSRF cookie not set.):``, you need to
+set your ``settings_local.py`` with the following::
+
+    CSRF_COOKIE_SECURE = False
+
+
 Testing it Out
 ==============
 
@@ -189,7 +206,17 @@ You might need to first set ``LC_CTYPE`` if you're on Mac OS X until
 What’s next?
 ============
 
-See `development <development.rst>`_ for further instructions.
+See :doc:`development <development>` for further instructions.
+
+Some site funcationaly require waffle flags.  Waffle flags include:
+
+-  ``kumaediting``:  Allows creation, editing, and translating of documents
+-  ``page_move``:  Allows moving of documents
+-  ``revision-dashboard-newusers``:  Allows searching of new users through the revision dashboard
+-  ``events_map``:  Allows display of map on the events page
+-  ``elasticsearch``:  Enables elastic search for site search
+
+To create or modify waffle flags, visit "/admin/" and click the "Waffle" link.
 
 Last Steps
 ==========
@@ -197,5 +224,5 @@ Last Steps
 Setting Up Search
 -----------------
 
-See the `search documentation <search.rst>`_ for steps to get Sphinx search
-working.
+See the :doc:`search documentation <search>` for steps to get Elasticsearch
+search working.

@@ -15,7 +15,6 @@ from tower import ugettext as _
 from tower import ugettext_lazy as _lazy
 
 from countries import COUNTRIES
-from dekicompat.backends import DekiUserBackend, MindTouchAPIError
 from sumo.models import ModelBase
 from sumo.urlresolvers import reverse
 from devmo.models import UserProfile
@@ -39,13 +38,10 @@ class Profile(ModelBase):
     bio = models.TextField(null=True, blank=True,
                            verbose_name=_lazy(u'Biography'))
     website = models.URLField(max_length=255, null=True, blank=True,
-                              verify_exists=False,
                               verbose_name=_lazy(u'Website'))
     twitter = models.URLField(max_length=255, null=True, blank=True,
-                              verify_exists=False,
                               verbose_name=_lazy(u'Twitter URL'))
     facebook = models.URLField(max_length=255, null=True, blank=True,
-                               verify_exists=False,
                                verbose_name=_lazy(u'Facebook URL'))
     irc_handle = models.CharField(max_length=255, null=True, blank=True,
                                   verbose_name=_lazy(u'IRC nickname'))
@@ -152,13 +148,6 @@ class RegistrationManager(ConfirmationManager):
         new_user.is_active = False
         new_user.save()
         profile = UserProfile.objects.create(user=new_user)
-        try:
-            deki_user = DekiUserBackend.post_mindtouch_user(new_user)
-        except MindTouchAPIError, e:
-            new_user.delete()
-            raise e
-        if deki_user:
-            profile.deki_user_id = deki_user.id
         profile.save()
 
         registration_profile = self.create_profile(new_user)
@@ -274,3 +263,22 @@ class EmailChange(models.Model):
 
     def __unicode__(self):
         return u'Change email request to %s for %s' % (self.email, self.user)
+
+
+class UserBan(models.Model):
+    user = models.ForeignKey(User, related_name="bans")
+    by = models.ForeignKey(User, related_name="bans_issued")
+    reason = models.TextField()
+    date = models.DateField(default=datetime.date.today)
+    is_active = models.BooleanField(default=True)
+
+    def __unicode__(self):
+        message = _lazy(u'%s banned by %s') % (self.user, self.by)
+        if not self.is_active:
+            message = _lazy(u"%s (no longer active)") % message
+        return message
+
+    def save(self, *args, **kwargs):
+        super(UserBan, self).save(*args, **kwargs)
+        self.user.is_active = not self.is_active
+        self.user.save()

@@ -1,3 +1,4 @@
+from datetime import datetime
 import json
 import re
 
@@ -15,10 +16,12 @@ from sumo.form_fields import StrippedCharField
 
 import wiki.content
 from wiki.models import (Document, Revision, FirefoxVersion, OperatingSystem,
-                         AttachmentRevision,
-                     FIREFOX_VERSIONS, OPERATING_SYSTEMS, SIGNIFICANCES,
-                     GROUPED_FIREFOX_VERSIONS, GROUPED_OPERATING_SYSTEMS,
-                     CATEGORIES, REVIEW_FLAG_TAGS, RESERVED_SLUGS)
+                         AttachmentRevision, valid_slug_parent,
+                         FIREFOX_VERSIONS, OPERATING_SYSTEMS, SIGNIFICANCES,
+                         GROUPED_FIREFOX_VERSIONS, GROUPED_OPERATING_SYSTEMS,
+                         CATEGORIES, REVIEW_FLAG_TAGS, RESERVED_SLUGS,
+                         TOC_DEPTH_CHOICES, LOCALIZATION_FLAG_TAGS)
+from wiki import SLUG_CLEANSING_REGEX
 
 
 TITLE_REQUIRED = _lazy(u'Please provide a title.')
@@ -56,6 +59,7 @@ OTHER_COLLIDES = _lazy(u'Another document with this metadata already exists.')
 MIDAIR_COLLISION = _lazy(u'This document was modified while you were '
                          'editing it.')
 MIME_TYPE_INVALID = _lazy(u'Files of this type are not permitted.')
+MOVE_REQUIRED = _lazy(u"Changing this document's slug requires moving it and its children.")
 
 
 class DocumentForm(forms.ModelForm):
@@ -197,10 +201,10 @@ class RevisionForm(forms.ModelForm):
                                 'max_length': SUMMARY_LONG})
 
     showfor_data = {
-        'oses': [(smart_str(c[0][0]), [(o.slug, smart_str(o.name)) for
+        'oses': [(unicode(c[0][0]), [(o.slug, unicode(o.name)) for
                                     o in c[1]]) for
                  c in GROUPED_OPERATING_SYSTEMS],
-        'versions': [(smart_str(c[0][0]), [(v.slug, smart_str(v.name)) for
+        'versions': [(unicode(c[0][0]), [(v.slug, unicode(v.name)) for
                                         v in c[1] if v.show_in_ui]) for
                      c in GROUPED_FIREFOX_VERSIONS]}
 
@@ -220,9 +224,10 @@ class RevisionForm(forms.ModelForm):
         widget=CheckboxSelectMultiple, required=False,
         choices=REVIEW_FLAG_TAGS)
 
-    show_toc = forms.BooleanField(
-        required=False,
-        label=_("Generate and display a table of contents in this article:"))
+    localization_tags = forms.MultipleChoiceField(
+        label=_("Tag this revision for localization?"),
+        widget=CheckboxSelectMultiple, required=False,
+        choices=LOCALIZATION_FLAG_TAGS)
 
     current_rev = forms.CharField(required=False,
                                   widget=forms.HiddenInput())
@@ -230,7 +235,8 @@ class RevisionForm(forms.ModelForm):
     class Meta(object):
         model = Revision
         fields = ('title', 'slug', 'tags', 'keywords', 'summary', 'content',
-                  'comment', 'based_on', 'show_toc')
+                  'comment', 'based_on', 'toc_depth',
+                  'render_max_age')
 
     def __init__(self, *args, **kwargs):
 
@@ -261,11 +267,17 @@ class RevisionForm(forms.ModelForm):
                 tool.injectSectionIDs()
                 if self.section_id:
                     tool.extractSection(self.section_id)
+                tool.filterEditorSafety()
                 content = tool.serialize()
             self.initial['content'] = content
 
             self.initial['review_tags'] = [x.name
                 for x in self.instance.review_tags.all()]
+            self.initial['localization_tags'] = [x.name
+                for x in self.instance.localization_tags.all()]
+
+        if self.section_id:
+            self.fields['toc_depth'].required = False
 
     def _clean_collidable(self, name):
         value = self.cleaned_data[name]
@@ -277,7 +289,7 @@ class RevisionForm(forms.ModelForm):
 
         error_message = {'slug': SLUG_COLLIDES}.get(name, OTHER_COLLIDES)
         try:
-            existing_doc = Document.uncached.get(
+            existing_doc = Document.objects.get(
                     locale=self.instance.document.locale,
                     **{name: value})
             if self.instance and self.instance.document:
@@ -298,7 +310,13 @@ class RevisionForm(forms.ModelForm):
         return value
 
     def clean_slug(self):
-        return self._clean_collidable('slug')
+        # TODO: move this check somewhere else?
+        # edits can come in without a slug, so default to the current doc slug
+        if not self.cleaned_data['slug']:
+            existing_slug = self.instance.document.slug
+            self.cleaned_data['slug'] = self.instance.slug = existing_slug
+        cleaned_slug = self._clean_collidable('slug')
+        return cleaned_slug
 
     def clean_content(self):
         """Validate the content, performing any section editing if necessary"""
@@ -355,6 +373,23 @@ class RevisionForm(forms.ModelForm):
             # If there's no document yet, just bail.
             return current_rev
 
+    def save_section(self, creator, document, **kwargs):
+        """Save a section edit."""
+        # This is separate because the logic is slightly different and
+        # may need to evolve over time; a section edit doesn't submit
+        # all the fields, and we need to account for that when we
+        # construct the new Revision.
+
+        old_rev = Document.objects.get(pk=self.instance.document.id).current_revision
+        new_rev = super(RevisionForm, self).save(commit=False, **kwargs)
+        new_rev.document = document
+        new_rev.creator = creator
+        new_rev.toc_depth = old_rev.toc_depth
+        new_rev.save()
+        new_rev.review_tags.set(*[t.name for t in
+                                  old_rev.review_tags.all()])
+        return new_rev
+
     def save(self, creator, document, **kwargs):
         """Persist me, and return the saved Revision.
 
@@ -362,14 +397,18 @@ class RevisionForm(forms.ModelForm):
         form.
 
         """
+        if self.section_id and self.instance and \
+           self.instance.document:
+            return self.save_section(creator, document, **kwargs)
         # Throws a TypeError if somebody passes in a commit kwarg:
         new_rev = super(RevisionForm, self).save(commit=False, **kwargs)
 
         new_rev.document = document
         new_rev.creator = creator
-        new_rev.show_toc = self.cleaned_data['show_toc']
+        new_rev.toc_depth = self.cleaned_data['toc_depth']
         new_rev.save()
         new_rev.review_tags.set(*self.cleaned_data['review_tags'])
+        new_rev.localization_tags.set(*self.cleaned_data['localization_tags'])
         return new_rev
 
 
@@ -452,3 +491,52 @@ class AttachmentRevisionForm(forms.ModelForm):
         rev.mime_type = mime_type
 
         return rev
+
+class TreeMoveForm(forms.Form):
+    title = StrippedCharField(min_length=1, max_length=255,
+                                required=False,
+                                widget=forms.TextInput(
+                                    attrs={'placeholder': TITLE_PLACEHOLDER}),
+                                label=_lazy(u'Title:'),
+                                help_text=_lazy(u'Title of article'),
+                                error_messages={'required': TITLE_REQUIRED,
+                                                'min_length': TITLE_SHORT,
+                                                'max_length': TITLE_LONG})
+    slug = StrippedCharField(min_length=1, max_length=255,
+                             widget=forms.TextInput(),
+                             label=_lazy(u'New slug:'),
+                             help_text=_lazy(u'New article URL'),
+                             error_messages={'required': SLUG_REQUIRED,
+                                             'min_length': SLUG_SHORT,
+                                             'max_length': SLUG_LONG})
+    locale = StrippedCharField(min_length=2, max_length=5,
+                               widget=forms.HiddenInput())
+
+    def clean_slug(self):
+        # We only want the slug here; inputting a full URL would lead
+        # to disaster.
+        if '://' in self.cleaned_data['slug']:
+            raise forms.ValidationError('Please enter only the slug to move '
+                                        'to, not the full URL.')
+
+        # Removes leading slash and {locale/docs/} if necessary
+        # IMPORTANT: This exact same regex is used on the client side, so
+        # update both if doing so
+        self.cleaned_data['slug'] = re.sub(re.compile(SLUG_CLEANSING_REGEX),
+                                           '', self.cleaned_data['slug'])
+
+        return self.cleaned_data['slug']
+
+    def clean(self):
+        cleaned_data = super(TreeMoveForm, self).clean()
+        if set(['slug', 'locale']).issubset(cleaned_data):
+            slug, locale = cleaned_data['slug'], cleaned_data['locale']
+            try:
+                valid_slug_parent(slug, locale)
+            except Exception, e:
+                raise forms.ValidationError(e.message)
+        return cleaned_data
+
+
+class DocumentDeletionForm(forms.Form):
+    reason = forms.CharField(widget=forms.Textarea(attrs={'autofocus': 'true'}))

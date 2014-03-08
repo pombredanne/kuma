@@ -1,7 +1,7 @@
 import threading
 
 from django.conf import settings
-from django.core.handlers.wsgi import WSGIRequest
+from django.test.client import RequestFactory
 from django.core.urlresolvers import reverse as django_reverse
 from django.utils.translation.trans_real import parse_accept_lang_header
 
@@ -10,9 +10,22 @@ from django.utils.translation.trans_real import parse_accept_lang_header
 _locals = threading.local()
 
 
+def get_best_language(accept_lang):
+    """Given an Accept-Language header, return the best-matching language."""
+
+    ranked = parse_accept_lang_header(accept_lang)
+    return find_supported(ranked)
+
+
 def set_url_prefixer(prefixer):
     """Set the Prefixer for the current thread."""
     _locals.prefixer = prefixer
+
+
+def reset_url_prefixer():
+    """Set the Prefixer for the current thread."""
+    global _locals
+    _locals = threading.local()
 
 
 def get_url_prefixer():
@@ -49,16 +62,50 @@ def reverse(viewname, urlconf=None, args=None, kwargs=None, prefix=None,
     if prefixer:
         prefix = prefix or '/'
     url = django_reverse(viewname, urlconf, args, kwargs, prefix)
+
+    # HACK: We rewrite URLs in apps/wiki/middleware.py, but don't have a
+    # concept for pluggable middleware in reverse() as far as I know. So, this
+    # is an app-specific override. ABSOLUTE_URL_OVERRIDES doesn't really do the
+    # trick.
+    #
+    # See apps/wiki/tests/test_middleware.py for a test exercising this hack.
+    if url.startswith('/docs/'):
+        # HACK: Import here, because otherwise it's a circular reference
+        from wiki.models import DocumentZone
+        # Work out a current locale, from some source.
+        zone_locale = locale
+        if not zone_locale: 
+            if prefixer:
+                zone_locale = prefixer.locale
+            else:
+                zone_locale = settings.WIKI_DEFAULT_LANGUAGE
+        # Get DocumentZone remaps for the current locale.
+        remaps = DocumentZone.objects.get_url_remaps(zone_locale)
+        for remap in remaps:
+            if url.startswith(remap['original_path']):
+                url = url.replace(remap['original_path'],
+                                  remap['new_path'], 1)
+                break
+
     if prefixer:
         return prefixer.fix(url)
     else:
         return url
 
 
-def find_supported(test):
-    return [settings.LANGUAGE_URL_MAP[x] for
-            x in settings.LANGUAGE_URL_MAP if
-            x.split('-', 1)[0] == test.lower().split('-', 1)[0]]
+def find_supported(ranked):
+    """Given a ranked language list, return the best-matching locale."""
+    langs = dict(settings.LANGUAGE_URL_MAP)
+    for lang, _ in ranked:
+        lang = lang.lower()
+        if lang in langs:
+            return langs[lang]
+        # Add derived language tags to the end of the list as a fallback.
+        pre = '-'.join(lang.split('-')[0:-1])
+        if pre:
+            ranked.append((pre, None))
+    # Couldn't find any acceptable locale.
+    return False
 
 
 def split_path(path):
@@ -72,21 +119,19 @@ def split_path(path):
     # Use partition instead of split since it always returns 3 parts
     first, _, rest = path.partition('/')
 
-    lang = first.lower()
-    if lang in settings.LANGUAGE_URL_MAP:
-        return settings.LANGUAGE_URL_MAP[lang], rest
+    # Treat locale as a single-item ranked list.
+    lang = find_supported([(first, 1.0)])
+
+    if lang:
+        return lang, rest
     else:
-        supported = find_supported(first)
-        if supported:
-            return supported[0], rest
-        else:
-            return '', path
+        return '', path
 
 
 class Prefixer(object):
     def __init__(self, request=None, locale=None):
         """If request is omitted, fall back to a default locale."""
-        self.request = request or WSGIRequest({'REQUEST_METHOD': 'bogus'})
+        self.request = request or RequestFactory(REQUEST_METHOD='bogus').request()
         self.locale, self.shortened_path = split_path(self.request.path_info)
         if locale:
             self.locale = locale
@@ -103,22 +148,10 @@ class Prefixer(object):
                 return settings.LANGUAGE_URL_MAP[lang]
 
         if self.request.META.get('HTTP_ACCEPT_LANGUAGE'):
-            ranked_languages = parse_accept_lang_header(
+            best = get_best_language(
                 self.request.META['HTTP_ACCEPT_LANGUAGE'])
-
-            # Do we support or remap their locale?
-            supported = [lang[0] for lang in ranked_languages if lang[0]
-                        in settings.LANGUAGE_URL_MAP]
-
-            # Do we support a less specific locale? (xx-YY -> xx)
-            if not len(supported):
-                for lang in ranked_languages:
-                    supported = find_supported(lang[0])
-                    if supported:
-                        break
-
-            if len(supported):
-                return settings.LANGUAGE_URL_MAP[supported[0].lower()]
+            if best:
+                return best
 
         return settings.LANGUAGE_CODE
 

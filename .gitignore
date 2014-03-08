@@ -19,6 +19,7 @@ build.py
 media/uploads
 media/attachments
 media/sitemap*
+static/
 locale
 xfers/*
 puppet/cache/*
@@ -29,3 +30,11 @@ webroot/.htaccess
 kumascript.log
 kumascript_settings_local.json
 lib/product_details_json
+.DS_Store
+node_modules/
+media/redesign/css/*.css
+docs/_build/
+.editorconfig
+maintenance/media
+wheelhouse
+.awsconfig

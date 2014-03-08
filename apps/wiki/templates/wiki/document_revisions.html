@@ -2,16 +2,12 @@
 {% extends "wiki/base.html" %}
 {% set title = _('Revision History | {document}')|fe(document=document.title) %}
 {% block title %}{{ page_title(title) }}{% endblock %}
-{% set crumbs = [(url('wiki.category', document.category), document.get_category_display()),
-                 (document.get_absolute_url(), document.title),
-                 (None, _('History'))] %}
 
 {% block content %}
-<section id="content">
-  <div class="wrap">
-    <div id="content-main" class="full">
-  <article id="revision-history" role="main">
-    <h1 class="title">{{ _('History of') }} <a href="{{ url('wiki.document', document.full_path, locale=document.locale) }}">{{ _('{title}')|fe(title=document.title) }}</a></h1>
+
+  <article id="revision-history">
+  
+    <h1>{{ _('History of') }} <a href="{{ url('wiki.document', document.full_path, locale=document.locale) }}">{{ _('{title}')|fe(title=document.title) }}</a></h1>
     
     <div class="choice-list">
       <label>{{ _('Revision history for:') }}</label>
@@ -39,31 +35,17 @@
             {% if document.current_revision == rev %}
               {% set reached_current = True %}
             {% endif %}
+            {% set is_current = document.current_revision.id == rev %}
             {% if loop.first %}<ul>{% endif %}
-            <li class="{% if document.current_revision == rev %}current{% endif %}{% if rev.reviewed and not rev.is_approved %}rejected{% endif %}">
+            <li class="{% if document.current_revision.id == rev %}current{% endif %}{% if rev.reviewed and not rev.is_approved %}rejected{% endif %}">
               <div class="radio">
-                {% if not loop.first %}<input type="radio" name="from" value="{{ rev.id }}" {% if loop.index == 2 %}checked="checked"{% endif %} />{% endif %}
+                {% if not current %}<input type="radio" name="from" value="{{ rev.id }}" {% if loop.index == 2 %}checked="checked"{% endif %} />{% endif %}
               </div>
               <div class="radio">
                 {% if not loop.last %}<input type="radio" name="to" value="{{ rev.id }}" {% if loop.first %}checked="checked"{% endif %} />{% endif %}
               </div>
               <div class="date">
                 <a href="{{ url('wiki.revision', document.full_path, rev.id) }}" rel="nofollow, noindex">{{ datetimeformat(rev.created, format='datetime') }}</a>
-              </div>
-              <div class="status">
-                {% if document.current_revision.id == rev.id %}
-                    <span class="current">{{ _('Current') }}</span>
-                {% elif not rev.is_approved and not rev.reviewed %}
-                    {% if not reached_current and user.has_perm('wiki.review_revision') %}
-                      <a href="{{ url('wiki.review_revision', document.full_path, rev.id) }}">{{ _('Review') }}</a>
-                    {% else %}
-                      <span class="unreviewed">{{ _('Unreviewed', 'revision') }}</span>
-                    {% endif %}
-                {% elif rev.is_approved %}
-                  <span class="approved">{{ _('Approved') }}</span>
-                {% else %}
-                    <span class="rejected">{{ _('Rejected') }}</span>
-                {% endif %}
               </div>
               <div class="significance">
                 {% if rev.significance == 20 %}
@@ -78,11 +60,11 @@
                 <a href="{{ url('devmo.views.profile_view', username=rev.creator) }}">{{ rev.creator }}</a>
               </div>
               <div class="comment">
-                {{ rev.comment }}
+                {{ format_comment(rev) }}
               </div>
               {% if document.current_revision.id != rev.id and user.has_perm('wiki.delete_revision') %}
               <div class="creator">
-                <a href="{{ url('wiki.revert_document', document.full_path, rev.id) }}">Revert</a>
+                <a href="{{ url('wiki.revert_document', document.full_path, rev.id) }}" class="button">{{ _('Revert to this revision') }}</a>
               </div>
               {% endif %}
             </li>
@@ -99,8 +81,25 @@
       {% endif %}
     </div>
   </article>
-    </div>
-   </div>
-</section>
+
+  {% if page %}
+    {{ page|paginator }}
+  {% endif %}
+
 {% endblock %}
 
+ {% block site_js %}
+  {{ super() }}
+  {{ js('framebuster') }}
+
+  <script type="text/javascript">
+    $(document).ready(function() {
+      var $pagination = $('.pagination');
+      var $next = $pagination.find('.next');
+
+      if($next.length) {
+        $pagination.append('<li><a href="?limit=all" id="pagination-all">' + gettext('View All') + '</a></li>');
+      }
+    });
+  </script>
+{% endblock %}

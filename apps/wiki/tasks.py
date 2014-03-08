@@ -1,22 +1,24 @@
 import logging
 
 from django.conf import settings
+from django.contrib.auth.models import User
 from django.contrib.sites.models import Site
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.mail import send_mail, mail_admins
 from django.db import transaction
+from django.dispatch import receiver
 from django.template import Context, loader
 
 import celery.conf
 from celery.task import task
 from celery.messaging import establish_connection
-from multidb.pinning import pin_this_thread, unpin_this_thread
 from tower import ugettext as _
 
 from sumo.urlresolvers import reverse
 from sumo.utils import chunked
 from wiki.models import Document, SlugCollision
+from wiki.signals import render_done
 
 
 log = logging.getLogger('k.task')
@@ -45,7 +47,7 @@ def send_reviewed_notification(revision, document, message):
                                 'message': message,
                                 'url': url,
                                 'host': Site.objects.get_current().domain}))
-    send_mail(subject, content, settings.NOTIFICATIONS_FROM_ADDRESS,
+    send_mail(subject, content, settings.TIDINGS_FROM_ADDRESS,
               [revision.creator.email])
 
 
@@ -82,8 +84,6 @@ def _rebuild_kb_chunk(data, **kwargs):
     """Re-render a chunk of documents."""
     log.info('Rebuilding %s documents.' % len(data))
 
-    pin_this_thread()  # Stick to master.
-
     messages = []
     for pk in data:
         message = None
@@ -106,12 +106,85 @@ def _rebuild_kb_chunk(data, **kwargs):
         subject = ('[%s] Exceptions raised in _rebuild_kb_chunk()' %
                    settings.PLATFORM_NAME)
         mail_admins(subject=subject, message='\n'.join(messages))
-    transaction.commit_unless_managed()
 
-    unpin_this_thread()  # Not all tasks need to do use the master.
+
+@task(rate_limit='10/m')
+def render_document(pk, cache_control, base_url):
+    """Simple task wrapper for the render() method of the Document model"""
+    document = Document.objects.get(pk=pk)
+    document.render(cache_control, base_url)
 
 
 @task
-def render_document(doc, cache_control, base_url):
-    """Simple task wrapper for the render() method of the Document model"""
-    doc.render(cache_control, base_url)
+def render_stale_documents(immediate=False):
+    """Simple task wrapper for rendering stale documents"""
+    Document.objects.render_stale(immediate=immediate, log=log)
+
+
+@task
+def build_json_data_for_document_task(pk, stale):
+    """Force-refresh cached JSON data after rendering."""
+    document = Document.objects.get(pk=pk)
+    document.get_json_data(stale=stale)
+
+
+@receiver(render_done)
+def build_json_data_handler(sender, instance, **kwargs):
+    try:
+        build_json_data_for_document_task.delay(instance.pk, stale=False)
+    except:
+        logging.error('JSON metadata build task failed',
+                      exc_info=True)
+
+
+@task
+@transaction.commit_manually
+def move_page(locale, slug, new_slug, email):
+    try:
+        user = User.objects.get(email=email)
+    except User.DoesNotExist:
+        transaction.rollback()
+        logging.error('Page move failed: no user with email address %s' % email)
+        return
+    try:
+        doc = Document.objects.get(locale=locale, slug=slug)
+    except Document.DoesNotExist:
+        transaction.rollback()
+        message = """
+        Page move failed.
+
+        Move was requested for document with slug %(slug)s in locale %(locale)s,
+        but no such document exists.
+        """ % {'slug': slug, 'locale': locale}
+        logging.error(message)
+        send_mail('Page move failed', message, settings.DEFAULT_FROM_EMAIL,
+                  [user.email])
+        return
+    try:
+        doc._move_tree(new_slug, user=user)
+    except Exception as e:
+        transaction.rollback()
+        message = """
+        Page move failed.
+
+        Move was requested for document with slug %(slug)s in locale %(locale)s,
+        but could not be completed. The following error was raised:
+
+        %(info)s
+        """ % {'slug': slug, 'locale': locale, 'info': e}
+        logging.error(message)
+        send_mail('Page move failed', message, settings.DEFAULT_FROM_EMAIL,
+                  [user.email])
+        return
+
+    transaction.commit()
+    message = """
+    Page move completed.
+
+    The move requested for the document with slug %(slug)s in locale
+    %(locale)s, and all its children, has been completed.
+
+    You can now view this document at its new slug, %(new_slug)s.
+    """ % {'slug': slug, 'locale': locale, 'new_slug': new_slug}
+    send_mail('Page move completed', message, settings.DEFAULT_FROM_EMAIL,
+              [user.email])

@@ -272,27 +272,26 @@ update the data on `Verbatim <http://localize.mozilla.org/>`_. If you commit
 new strings to SVN and they are not updated right away on Verbatim, there will
 be big merging headaches.
 
-Updating strings is pretty easy. Check out the localizations as above, then::
+Updating strings is pretty easy. Check out the localizations as above, then run
+the following in the virtual machine (see :doc:`installation-vagrant <installation-vagrant>`
+for more on setting up the virtual machine)::
 
     $ python manage.py extract
-    $ python manage.py verbatimize --rename
 
-Congratulations! You've now updated the POT file.
+Congratulations! You've now updated the POT file. Now commit the POT file.
 
-Now commit the POT file to svn::
+If you used ``svn checkout`` above::
 
     $ cd locale
     $ svn up
     $ svn ci -m "MDN string update YYYY-MM-DD"
 
-After committing, update the `templates in Verbatim
-<https://localize.mozilla.org/templates/mdn/>`_ from SVN.
+If you used ``git svn clone`` above::
 
-![Updating verbatim templates from
-SVN](https://dl.dropbox.com/u/21969365/images/templates_mdn.png)
+    $ cd locale
+    $ git svn fetch
+    $ git add -A
+    $ git commit -m "MDN string update YYYY-MM-DD"
+    $ git svn dcommit
 
-After updating the templates in Verbatim, `update each language
-<https://localize.mozilla.org/projects/mdn/admin.html>`_ from the templates.
-
-![Updating messages from
-templates](https://dl.dropbox.com/u/21969365/images/mdn_admin_update.png)
+After committing, send an email to Milos Dinic to update verbatim.
