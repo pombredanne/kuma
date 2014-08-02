@@ -1,7 +1,7 @@
 from rest_framework import serializers, pagination
 
 from .fields import (SearchQueryField, DocumentExcerptField,
-                     TopicQueryField, LocaleField)
+                     LocaleField, SiteURLField)
 from .models import Filter
 
 
@@ -10,7 +10,7 @@ class FilterURLSerializer(serializers.Serializer):
     inactive = serializers.CharField(read_only=True)
 
 
-class FacetedFilterSerializer(serializers.Serializer):
+class FacetedFilterOptionsSerializer(serializers.Serializer):
     name = serializers.CharField(read_only=True)
     slug = serializers.CharField(read_only=True)
     count = serializers.IntegerField(read_only=True)
@@ -20,7 +20,8 @@ class FacetedFilterSerializer(serializers.Serializer):
 
 class FacetedFilterSerializer(serializers.Serializer):
     name = serializers.CharField(read_only=True)
-    options = FacetedFilterSerializer(source='options')
+    slug = serializers.CharField(read_only=True)
+    options = FacetedFilterOptionsSerializer(source='options')
 
 
 class SearchSerializer(pagination.PaginationSerializer):
@@ -37,21 +38,33 @@ class SearchSerializer(pagination.PaginationSerializer):
                                       many=True)
 
 
-class DocumentSerializer(serializers.Serializer):
+class BaseDocumentSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
     title = serializers.CharField(read_only=True, max_length=255)
     slug = serializers.CharField(read_only=True, max_length=255)
     locale = serializers.CharField(read_only=True, max_length=7)
+    url = SiteURLField('wiki.document', args=['slug'])
+    edit_url = SiteURLField('wiki.edit_document', args=['slug'])
+
+    def field_to_native(self, obj, field_name):
+        if field_name == 'parent' and not getattr(obj, 'parent', None):
+            return {}
+        return super(BaseDocumentSerializer, self).field_to_native(obj, field_name)
+
+
+class DocumentSerializer(BaseDocumentSerializer):
     excerpt = DocumentExcerptField(source='*')
-    url = serializers.CharField(read_only=True, source='get_url')
-    edit_url = serializers.CharField(read_only=True, source='get_edit_url')
     tags = serializers.ChoiceField(read_only=True, source='tags')
-    score = serializers.FloatField(read_only=True, source='_score')
-    explanation = serializers.CharField(read_only=True, source='_explanation')
+    score = serializers.FloatField(read_only=True, source='es_meta.score')
+    explanation = serializers.CharField(read_only=True,
+                                        source='es_meta.explanation')
+    parent = BaseDocumentSerializer(read_only=True,
+                                    source='parent')
 
 
 class FilterGroupSerializer(serializers.Serializer):
     name = serializers.CharField(read_only=True)
+    slug = serializers.CharField(read_only=True)
     order = serializers.CharField(read_only=True)
 
 

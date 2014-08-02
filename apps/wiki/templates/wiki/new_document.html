@@ -1,6 +1,6 @@
-{# vim: set ts=2 et sts=2 sw=2: #}
 {% extends "wiki/base.html" %}
-{% from "layout/errorlist.html" import errorlist %}
+{% from "includes/error_list.html" import errorlist %}
+{% from 'wiki/includes/page_buttons.html' import page_buttons %}
 {% from "includes/common_macros.html" import content_editor %}
 {% set title = _('Create a New {title}')|fe(title=('Template' if is_template else 'Article')) %}
 {% block title %}{{ page_title(title) }}{% endblock %}
@@ -9,11 +9,12 @@
 
 {% block site_css %}
     {{ super() }}
+    {{ css('wiki-edit') }}
     {{ css('jquery-ui') }}
 {% endblock %}
 
 {% block content %}
-    <article>
+    <article id="new-document">
     {{ errorlist(document_form) }}
     {{ errorlist(revision_form) }}
     <form id="wiki-page-edit" class="editing" method="post" action="">
@@ -21,7 +22,7 @@
       <fieldset>
       <header id="article-head">
 
-        {% include 'wiki/includes/page_buttons.html' %}
+        {{ page_buttons(wiki, document, discard_href, 'top') }}
 
         {{ document_form.category|safe }}
 
@@ -30,10 +31,16 @@
         </div>
 
         <ul class="metadata">
-          <li><label>{{_('Title:')}}</label> {{ document_form.title | safe }}</li>
-          <li><label><dfn title="{{_('URL segment that identifies the page')}}">{{_('Slug:')}}</dfn></label> {{ document_form.slug | safe }}</li>
+            <li class="clear">
+                <label for="id_title">{{_('Title:')}}</label>
+                {{ document_form.title | safe }}
+            </li>
+            <li class="clear">
+                <label for="id_slug"><dfn title="{{_('URL segment that identifies the page')}}">{{_('Slug:')}}</dfn></label>
+                {{ document_form.slug | safe }}
+            </li>
           {% if parent_slug and not is_template %}
-            <li><label>{{_('Parent:')}}</label>
+            <li class="clear"><label>{{_('Parent:')}}</label>
                 <a href="{{ parent_path }}" class="metadataDisplay" target="_blank">{{ parent_slug }}</a></li>
           {% endif %}
           {% if is_template %}
@@ -60,22 +67,25 @@
 
       {% include 'wiki/includes/revision_comment.html' %}
 
-      <section class="page-meta">
-        <section id="page-tags" class="page-tags">
+      <section id="page-tags" class="page-tags wiki-block">
 
-            <h3><i aria-hidden="true" class="icon-tags"></i>{{ _('Tags') }}</h3>
+          <h3><i aria-hidden="true" class="icon-tags"></i>{{ _('Tags') }}</h3>
 
-          <input id="tagit_tags" type="text" name="tags" value="{% for tag in initial_tags %}{{ tag.name }},{% endfor %}" maxlength="255" />
-        </section>
+        <input id="tagit_tags" type="text" name="tags" value="{% for tag in initial_tags %}{{ tag.name }},{% endfor %}" maxlength="255" />
       </section>
 
+
     </fieldset>
+
+      <section class="wiki-block">
+        {{ page_buttons(wiki, document, discard_href, 'bottom') }}
+      </section>
     </form>
 
     {% include 'wiki/includes/attachment_list.html' %}
 
     </article>
-    
+
 {% endblock %}
 
 {% block site_js %}

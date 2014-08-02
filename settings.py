@@ -1,5 +1,4 @@
 # Django settings for kuma project.
-from datetime import date
 import logging
 import os
 import platform
@@ -7,6 +6,7 @@ import json
 
 from django.utils.functional import lazy
 from django.utils.translation import ugettext_lazy as _
+from django.core.urlresolvers import reverse_lazy
 
 from sumo_locales import LOCALES
 
@@ -19,13 +19,14 @@ path = lambda *a: os.path.join(ROOT, *a)
 ROOT_PACKAGE = os.path.basename(ROOT)
 
 ADMINS = (
-    # ('Your Name', 'your_email@domain.com'),
+    ('MDN devs', 'mdn-dev@mozilla.com'),
 )
 
 PROTOCOL = 'https://'
 DOMAIN = 'developer.mozilla.org'
 SITE_URL = PROTOCOL + DOMAIN
 PRODUCTION_URL = SITE_URL
+STAGING_URL = PROTOCOL + 'developer.allizom.org'
 USE_X_FORWARDED_HOST = True
 
 MANAGERS = ADMINS
@@ -52,22 +53,15 @@ MIGRATION_DATABASES = {
     },
 }
 
-# Dekiwiki has a backend API. protocol://hostname:port
-# If set to False, integration with MindTouch / Dekiwiki will be disabled
-DEKIWIKI_ENDPOINT = False # 'https://developer-stage9.mozilla.org'
-DEKIWIKI_APIKEY = 'SET IN LOCAL SETTINGS'
-DEKIWIKI_MOCK = True
-
 # Cache Settings
-CACHE_BACKEND = 'locmem://?timeout=86400'
-CACHE_PREFIX = 'kuma:'
-CACHE_COUNT_TIMEOUT = 60  # seconds
+CACHE_PREFIX = 'kuma'
+CACHE_COUNT_TIMEOUT = 60  # in seconds
 
 CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-        'TIMEOUT': 60,
-        'KEY_PREFIX': 'kuma',
+        'TIMEOUT': CACHE_COUNT_TIMEOUT,
+        'KEY_PREFIX': CACHE_PREFIX,
     },
     # NOTE: The 'secondary' cache should be the same as 'default' in
     # settings_local. The only reason it exists is because we had some issues
@@ -75,9 +69,15 @@ CACHES = {
     # caching on a case-by-case basis to resolve the issue.
     'secondary': {
         'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-        'TIMEOUT': 60,
-        'KEY_PREFIX': 'kuma',
-    }
+        'TIMEOUT': CACHE_COUNT_TIMEOUT,
+        'KEY_PREFIX': CACHE_PREFIX,
+    },
+    'memcache': {
+        'BACKEND': 'memcached_hashring.backend.MemcachedHashRingCache',
+        'TIMEOUT': CACHE_COUNT_TIMEOUT * 60,
+        'KEY_PREFIX': CACHE_PREFIX,
+        'LOCATION': ['127.0.0.1:11211'],
+    },
 }
 
 SECONDARY_CACHE_ALIAS = 'secondary'
@@ -112,11 +112,52 @@ SUMO_LANGUAGES = (
 )
 
 # Accepted locales
-MDN_LANGUAGES = ('en-US', 'ar', 'bn-BD', 'de', 'el', 'es', 'fa', 'fi', 'fr',
-                 'cs', 'ca', 'fy-NL', 'ga-IE', 'he', 'hr', 'hu', 'id', 'it',
-                 'ja', 'ka', 'ko', 'ms', 'nl', 'pl', 'pt-BR', 'pt-PT', 'ro',
-                 'ru', 'sq', 'th', 'tr', 'vi', 'zh-CN', 'zh-TW')
-RTL_LANGUAGES = ('ar', 'fa', 'fa-IR', 'he')
+MDN_LANGUAGES = (
+                 'en-US',
+                 'ar',
+                 'bn-BD',
+                 'de',
+                 'el',
+                 'es',
+                 'fa',
+                 'fi',
+                 'fr',
+                 'cs',
+                 'ca',
+                 'fy-NL',
+                 'ga-IE',
+                 'he',
+                 'hi-IN',
+                 'hr',
+                 'hu',
+                 'id',
+                 'it',
+                 'ja',
+                 'ka',
+                 'ko',
+                 'ml',
+                 'ms',
+                 'nl',
+                 'pl',
+                 'pt-BR',
+                 'pt-PT',
+                 'ro',
+                 'ru',
+                 'sq',
+                 'ta',
+                 'th',
+                 'tr',
+                 'vi',
+                 'zh-CN',
+                 'zh-TW'
+)
+
+RTL_LANGUAGES = (
+                 'ar',
+                 'fa',
+                 'fa-IR',
+                 'he'
+)
 
 DEV_POOTLE_PRODUCT_DETAILS_MAP = {
     'pt': 'pt-PT',
@@ -185,8 +226,9 @@ def lazy_langs():
     return dict([(lang.lower(), product_details.languages[lang]['native'])
                 for lang in langs])
 
-LANGUAGES = lazy(lazy_langs, dict)()
-LANGUAGE_CHOICES = sorted(tuple([(i, LOCALES[i].native) for i in MDN_LANGUAGES]), key=lambda lang:lang[0])
+LANGUAGES_DICT = lazy(lazy_langs, dict)()
+LANGUAGES = sorted(tuple([(i, LOCALES[i].native) for i in MDN_LANGUAGES]),
+                   key=lambda lang:lang[0])
 
 # DEKI uses different locale keys
 def lazy_language_deki_map():
@@ -299,9 +341,21 @@ STATIC_ROOT = path('static')
 SERVE_MEDIA = False
 
 # Paths that don't require a locale prefix.
-SUPPORTED_NONLOCALES = ('media', 'admin', 'robots.txt', 'services', 'static',
-                        '1', 'files', '@api', 'grappelli',
-                        '.well-known')
+LANGUAGE_URL_IGNORED_PATHS = (
+    'media',
+    'admin',
+    'robots.txt',
+    'services',
+    'static',
+    '1',
+    'files',
+    '@api',
+    'grappelli',
+    '__debug__',
+    '.well-known',
+    'users/persona/login/',
+    'users/github/login/callback/',
+)
 
 # Make this unique, and don't share it with anybody.
 SECRET_KEY = '#%tc(zja8j01!r#h_y)=hy!^k)9az74k+-ib&ij&+**s3-e^_z'
@@ -315,10 +369,8 @@ TEMPLATE_LOADERS = (
 
 JINGO_EXCLUDE_APPS = (
     'admin',
-    'admindocs',
-    'registration',
     'grappelli',
-    'waffle'
+    'waffle',
 )
 
 TEMPLATE_CONTEXT_PROCESSORS = (
@@ -329,16 +381,16 @@ TEMPLATE_CONTEXT_PROCESSORS = (
     'django.core.context_processors.csrf',
     'django.contrib.messages.context_processors.messages',
 
+    'allauth.account.context_processors.account',
+    'allauth.socialaccount.context_processors.socialaccount',
+
     'sumo.context_processors.global_settings',
-    'sumo.context_processors.for_data',
 
     'devmo.context_processors.i18n',
     'devmo.context_processors.next_url',
 
     'jingo_minify.helpers.build_ids',
-
     'constance.context_processors.config',
-    'django_browserid.context_processors.browserid_form',
 )
 
 MIDDLEWARE_CLASSES = (
@@ -366,7 +418,7 @@ MIDDLEWARE_CLASSES = (
     'sumo.anonymous.AnonymousIdentityMiddleware',
     'sumo.middleware.PlusToSpaceMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-    'users.middleware.BanMiddleware',
+    'kuma.users.middleware.BanMiddleware',
 
     'badger.middleware.RecentBadgeAwardsMiddleware',
     'wiki.badges.BadgeAwardingMiddleware',
@@ -374,21 +426,21 @@ MIDDLEWARE_CLASSES = (
 
 # Auth
 AUTHENTICATION_BACKENDS = (
-    'django_browserid.auth.BrowserIDBackend',
     'django.contrib.auth.backends.ModelBackend',
+    'allauth.account.auth_backends.AuthenticationBackend',
     'teamwork.backends.TeamworkBackend',
 )
-AUTH_PROFILE_MODULE = 'devmo.UserProfile'
+AUTH_PROFILE_MODULE = 'users.UserProfile'
 
 PASSWORD_HASHERS = (
-    'users.backends.Sha256Hasher',
+    'kuma.users.backends.Sha256Hasher',
     'django.contrib.auth.hashers.SHA1PasswordHasher',
     'django.contrib.auth.hashers.MD5PasswordHasher',
     'django.contrib.auth.hashers.UnsaltedMD5PasswordHasher',
 )
 
 USER_AVATAR_PATH = 'uploads/avatars/'
-DEFAULT_AVATAR = MEDIA_URL + 'img/avatar-default.png'
+DEFAULT_AVATAR = MEDIA_URL + 'img/avatar.png'
 AVATAR_SIZE = 48  # in pixels
 ACCOUNT_ACTIVATION_DAYS = 30
 MAX_AVATAR_FILE_SIZE = 131072  # 100k, in bytes
@@ -424,20 +476,23 @@ INSTALLED_APPS = (
     'django.contrib.sitemaps',
     'django.contrib.staticfiles',
 
-    # BrowserID
-    'django_browserid',
-
     # MDN
     'devmo',
     'docs',
-    'feeder',
+    'kuma.feeder',
     'landing',
     'search',
-    'users',
+    'kuma.users',
+    'allauth',
+    'allauth.account',
+    'allauth.socialaccount',
+    'allauth.socialaccount.providers.persona',
+    'allauth.socialaccount.providers.github',
     'wiki',
+    'kuma.events',
 
     # DEMOS
-    'demos',
+    'kuma.demos',
     'captcha',
     'contentflagging',
     'actioncounters',
@@ -462,33 +517,40 @@ INSTALLED_APPS = (
 
     'dashboards',
     'kpi',
+    'statici18n',
+    'rest_framework',
 
     # migrations
     'south',
-    'rest_framework',
 
     # testing.
     'django_nose',
     'test_utils',
 
     # other
-    'humans',
+    'kuma.humans',
 
     'badger',
 )
 
 TEST_RUNNER = 'test_utils.runner.RadicalTestSuiteRunner'
+
+NOSE_ARGS = [
+    '--traverse-namespace',  # make sure `./manage.py test kuma` works
+]
+
 TEST_UTILS_NO_TRUNCATE = ('django_content_type',)
 
 # Feed fetcher config
-FEEDER_TIMEOUT = 6 # in seconds
+FEEDER_TIMEOUT = 6  # in seconds
 
 def JINJA_CONFIG():
     import jinja2
     from django.conf import settings
     from django.core.cache.backends.memcached import CacheClass as MemcachedCacheClass
-    from caching.base import cache
-    config = {'extensions': ['tower.template.i18n', 'caching.ext.cache',
+    from django.core.cache import get_cache
+    cache = get_cache('memcache')
+    config = {'extensions': ['jinja2.ext.i18n', 'tower.template.i18n',
                              'jinja2.ext.with_', 'jinja2.ext.loopcontrols',
                              'jinja2.ext.autoescape'],
               'finalize': lambda x: x if x is not None else ''}
@@ -498,7 +560,7 @@ def JINJA_CONFIG():
         # Details: http://jinja.pocoo.org/2/documentation/api#bytecode-cache
         # and in the errors you get when you try it the other way.
         bc = jinja2.MemcachedBytecodeCache(cache._cache,
-                                           "%sj2:" % settings.CACHE_PREFIX)
+                                           "%s:j2:" % settings.CACHE_PREFIX)
         config['cache_size'] = -1  # Never clear the cache
         config['bytecode_cache'] = bc
     return config
@@ -522,6 +584,8 @@ DOMAIN_METHODS = {
             'tower.management.commands.extract.extract_tower_python'),
         ('**/templates/**.html',
             'tower.management.commands.extract.extract_tower_template'),
+        ('**/templates/**.ltxt',
+            'tower.management.commands.extract.extract_tower_template'),
     ],
     'javascript': [
         # We can't say **.js because that would dive into any libraries.
@@ -543,12 +607,13 @@ TOWER_ADD_HEADERS = True
 
 # Bundles for JS/CSS Minification
 JINGO_MINIFY_USE_STATIC = False
+CLEANCSS_BIN = '/usr/bin/cleancss'
+UGLIFY_BIN = '/usr/bin/uglifyjs'
+
 MINIFY_BUNDLES = {
     'css': {
         'mdn': (
-            'css/fonts.css',
-            'css/mdn-screen.css',
-            'css/libs/font-awesome/css/font-awesome.css',
+            'redesign/css/font-awesome.css',
             'redesign/css/main.css',
             'redesign/css/badges.css',
         ),
@@ -573,34 +638,29 @@ MINIFY_BUNDLES = {
             'redesign/css/search.css',
         ),
         'wiki': (
-            'css/wiki.css',
-            'css/wiki-screen.css',
             'redesign/css/wiki.css',
             'redesign/css/zones.css',
             'redesign/css/diff.css',
-        ),
-        'sphinx': (
-            'redesign/css/wiki.css',
-            'redesign/css/sphinx.css',
-        ),
-        'dashboards': (
-            'css/dashboards.css',
-            'js/libs/DataTables-1.9.4/media/css/jquery.dataTables.css',
-            'js/libs/DataTables-1.9.4/extras/Scroller/media/css/dataTables.scroller.css',
-        ),
-        'users': (
-            'redesign/css/users.css',
-        ),
-        'tagit': (
-            'css/libs/jquery.tagit.css',
-        ),
-        'syntax-prism': (
+
             'js/libs/prism/themes/prism.css',
             'js/libs/prism/plugins/line-highlight/prism-line-highlight.css',
             'js/libs/prism/plugins/ie8/prism-ie8.css',
             'js/prism-mdn/plugins/line-numbering/prism-line-numbering.css',
             'js/prism-mdn/components/prism-json.css',
             'redesign/css/wiki-syntax.css',
+        ),
+        'wiki-edit': (
+            'redesign/css/wiki-edit.css',
+        ),
+        'sphinx': (
+            'redesign/css/wiki.css',
+            'redesign/css/sphinx.css',
+        ),
+        'users': (
+            'redesign/css/users.css',
+        ),
+        'tagit': (
+            'css/libs/jquery.tagit.css',
         ),
         'promote': (
             'redesign/css/promote.css',
@@ -618,35 +678,39 @@ MINIFY_BUNDLES = {
         'profile': (
             'redesign/css/profile.css',
         ),
-        'redesign-dashboards': (
+        'dashboards': (
             'redesign/css/dashboards.css',
             'redesign/css/diff.css',
-            'js/libs/DataTables-1.9.4/media/css/jquery.dataTables.css',
-            'js/libs/DataTables-1.9.4/extras/Scroller/media/css/dataTables.scroller.css',
         ),
         'newsletter': (
             'redesign/css/newsletter.css',
         ),
+        'learn': (
+            'redesign/css/learn.css',
+        ),
+        'submission': (
+            'redesign/css/submission.css',
+        ),
+        'user-banned': (
+            'redesign/css/user-banned.css',
+        ),
+        'error-403-alternate': (
+            'redesign/css/error-403-alternate.css',
+        ),
     },
     'js': {
-        'redesign-main': (
-            'js/jquery-upgrade-compat.js',
+        'main': (
+            'js/libs/jquery-2.1.0.js',
             'redesign/js/components.js',
+            'redesign/js/analytics.js',
             'redesign/js/main.js',
             'redesign/js/badges.js',
-        ),
-        'jquery2': (
-            'js/libs/jquery-2.1.0.js',
-        ),
-        'jquery1': (
-            'js/libs/jquery-1.9.1.js',
         ),
         'home': (
             'js/libs/owl.carousel/owl-carousel/owl.carousel.js',
             'redesign/js/home.js'
         ),
         'popup': (
-            'js/jquery-upgrade-compat.js',
             'js/libs/jquery-ui-1.10.3.custom/js/jquery-ui-1.10.3.custom.min.js',
             'js/modal-control.js',
         ),
@@ -676,20 +740,8 @@ MINIFY_BUNDLES = {
             'js/libs/tag-it.js',
         ),
         'search': (
-            'js/store.js',
             'redesign/js/search.js',
-        ),
-        'wiki-edit': (
-            'js/wiki-edit.js',
-            'js/libs/tag-it.js',
-            'js/wiki-tags-edit.js',
-        ),
-        'dashboards': (
-            'js/libs/DataTables-1.9.4/media/js/jquery.dataTables.js',
-            'js/libs/DataTables-1.9.4/extras/Scroller/media/js/dataTables.scroller.js',
-        ),
-        'users': (
-            'js/empty.js',
+            'redesign/js/search-navigator.js',
         ),
         'framebuster': (
             'js/framebuster.js',
@@ -702,17 +754,22 @@ MINIFY_BUNDLES = {
             'js/syntax-prism.js',
         ),
         'wiki': (
-            'js/store.js',
-            'redesign/js/search.js',
+            'redesign/js/search-navigator.js',
             'redesign/js/wiki.js',
+        ),
+        'wiki-edit': (
+            'js/wiki-edit.js',
+            'js/libs/tag-it.js',
+            'js/wiki-tags-edit.js',
+        ),
+        'wiki-move': (
+            'js/wiki-move.js',
         ),
         'newsletter': (
             'redesign/js/newsletter.js',
         ),
     },
 }
-
-JAVA_BIN = '/usr/bin/java'
 
 #
 # Session cookies
@@ -731,13 +788,6 @@ MAX_FILENAME_LENGTH = 200
 MAX_FILEPATH_LENGTH = 250
 
 ATTACHMENT_HOST = 'mdn.mozillademos.org'
-
-# Auth and permissions related constants
-LOGIN_URL = '/users/login'
-LOGOUT_URL = '/users/logout'
-LOGIN_REDIRECT_URL = "/"
-LOGOUT_REDIRECT_URL = "/"
-REGISTER_URL = '/users/register'
 
 # Video settings, hard coded here for now.
 # TODO: figure out a way that doesn't need these values
@@ -771,6 +821,7 @@ CELERY_ALWAYS_EAGER = True  # For tests. Set to False for use.
 CELERY_SEND_TASK_ERROR_EMAILS = True
 CELERYD_LOG_LEVEL = logging.INFO
 CELERYD_CONCURRENCY = 4
+CELERY_SEND_TASK_SENT_EVENT = True
 
 CELERY_IMPORTS = (
     'devmo.tasks',
@@ -816,11 +867,19 @@ RECAPTCHA_PRIVATE_KEY = 'SET ME IN SETTINGS_LOCAL'
 RECAPTCHA_PUBLIC_KEY = 'SET ME IN SETTINGS_LOCAL'
 
 # content flagging
-FLAG_REASONS = (
+DEMO_FLAG_REASONS = (
     ('notworking', _('This demo is not working for me')),
     ('inappropriate', _('This demo contains inappropriate content')),
     ('plagarised', _('This demo was not created by the author')),
 )
+
+WIKI_FLAG_REASONS = (
+    ('bad', _('This article is spam/inappropriate')),
+    ('unneeded', _('This article is obsolete/unneeded')),
+    ('duplicate', _('This is a duplicate of another article')),
+)
+
+FLAG_REASONS = DEMO_FLAG_REASONS + WIKI_FLAG_REASONS
 
 # bit.ly
 BITLY_API_KEY = "SET ME IN SETTINGS_LOCAL"
@@ -846,18 +905,11 @@ SOUTH_MIGRATION_MODULES = {
 }
 
 CONSTANCE_BACKEND = 'constance.backends.database.DatabaseBackend'
-CONSTANCE_DATABASE_CACHE_BACKEND = None
+# must be an entry in the CACHES setting!
+CONSTANCE_DATABASE_CACHE_BACKEND = 'memcache'
 
 # Settings and defaults controllable by Constance in admin
 CONSTANCE_CONFIG = dict(
-
-    BROWSERID_REALM_JSON = (
-        json.dumps({
-            'realm': ['https://developer.mozilla.org',
-                      'https://marketplace.firefox.com']
-        }),
-        "Define the other sites belonging to this site's BrowserID realm."
-    ),
 
     DEMOS_DEVDERBY_CURRENT_CHALLENGE_TAG = (
         "challenge:2011:september",
@@ -1037,11 +1089,6 @@ CONSTANCE_CONFIG = dict(
         "JSON array of tags that are enabled for search faceting"
     ),
 
-    EXTERNAL_SIGNUP_EMAIL = (
-        '',
-        'The email address to receive external docs signup emails.'
-    ),
-
     SESSION_CLEANUP_CHUNK_SIZE = (
         1000,
         'Number of expired sessions to cleanup up in one go.',
@@ -1049,11 +1096,6 @@ CONSTANCE_CONFIG = dict(
 
 
 )
-
-BROWSERID_VERIFICATION_URL = 'https://verifier.login.persona.org/verify'
-
-LOGIN_REDIRECT_URL = '/'
-LOGIN_REDIRECT_URL_FAILURE = '/'
 
 BASKET_URL = 'https://basket.mozilla.com'
 BASKET_APPS_NEWSLETTER = 'app-dev'
@@ -1103,11 +1145,19 @@ LOGGING = {
             # Use the most permissive setting. It is filtered in the handlers.
             'level': logging.DEBUG,
         },
+        'cron': {
+            'handlers': ['console'],
+            'level': logging.INFO,
+        },
         'django.request': {
             'handlers': ['console'],
             'propagate': True,
             # Use the most permissive setting. It is filtered in the handlers.
             'level': logging.DEBUG,
+        },
+        'elasticsearch': {
+            'level': logging.ERROR,
+            'handlers': ['console'],
         },
     },
 }
@@ -1129,12 +1179,47 @@ GRAPPELLI_INDEX_DASHBOARD = 'admin_dashboard.CustomIndexDashboard'
 DBGETTEXT_PATH = 'apps/'
 DBGETTEXT_ROOT = 'translations'
 
+
 def get_user_url(user):
     from sumo.urlresolvers import reverse
-    return reverse('devmo.views.profile_view', args=[user.username])
+    return reverse('users.profile', args=[user.username])
 
 ABSOLUTE_URL_OVERRIDES = {
     'auth.user': get_user_url
 }
 
 OBI_BASE_URL = 'https://backpack.openbadges.org/'
+
+# Honor the X-Forwarded-Proto header for environments like local dev VM that
+# uses Apache mod_proxy instead of mod_wsgi
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+# Auth and permissions related constants
+LOGIN_URL = reverse_lazy('account_login')
+LOGOUT_URL = reverse_lazy('account_logout')
+LOGIN_REDIRECT_URL = reverse_lazy('home')
+
+# django-allauth configuration
+ACCOUNT_LOGOUT_REDIRECT_URL = '/'
+ACCOUNT_DEFAULT_HTTP_PROTOCOL = 'https'
+ACCOUNT_EMAIL_VERIFICATION = 'mandatory'
+ACCOUNT_EMAIL_REQUIRED = True
+ACCOUNT_LOGOUT_ON_GET = True
+ACCOUNT_USERNAME_MIN_LENGTH = 3
+ACCOUNT_ADAPTER = 'kuma.users.adapters.KumaAccountAdapter'
+ACCOUNT_SIGNUP_FORM_CLASS = 'kuma.users.forms.SignupForm'
+ACCOUNT_UNIQUE_EMAIL = True
+
+SOCIALACCOUNT_ADAPTER = 'kuma.users.adapters.KumaSocialAccountAdapter'
+SOCIALACCOUNT_EMAIL_VERIFICATION = 'mandatory'
+SOCIALACCOUNT_EMAIL_REQUIRED = True
+SOCIALACCOUNT_AUTO_SIGNUP = False  # forces the use of the signup view
+SOCIALACCOUNT_QUERY_EMAIL = True  # used by the custom github provider
+SOCIALACCOUNT_PROVIDERS = {
+    'persona': {
+        'REQUEST_PARAMETERS': {
+            'siteName': 'Mozilla Developer Network',
+            'siteLogo': '/media/redesign/img/opengraph-logo.png',
+        }
+    }
+}

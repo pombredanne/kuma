@@ -22,18 +22,17 @@ from waffle.models import Switch
 from sumo import ProgrammingError
 from sumo.tests import TestCase
 
+from devmo.utils import MemcacheLock
 from devmo.tests import override_constance_settings
 
 from wiki.cron import calculate_related_documents
-from wiki.models import (FirefoxVersion, OperatingSystem, Document, Revision,
+from wiki.exceptions import (PageMoveError,
+                             DocumentRenderedContentNotAvailable,
+                             DocumentRenderingInProgress)
+from wiki.models import (Document, Revision,
                          Attachment, DocumentZone,
-                         MAJOR_SIGNIFICANCE, CATEGORIES,
-                         get_current_or_latest_revision,
-                         DocumentRenderedContentNotAvailable,
-                         DocumentRenderingInProgress,
                          TaggedDocument,)
-from wiki.tests import (document, revision, doc_rev, translated_revision,
-                        normalize_html,
+from wiki.tests import (document, revision, doc_rev, normalize_html,
                         create_template_test_users,
                         create_topical_parents_docs)
 from wiki import tasks
@@ -132,6 +131,14 @@ class DocumentTests(TestCase):
         doc.tags.set(*expected_tags)
         doc.current_revision.review_tags.set(*expected_review_tags)
 
+        # Create a translation with some tags
+        de_doc = document(parent=doc, locale='de', save=True)
+        de_rev = revision(document=de_doc, save=True)
+        expected_l10n_tags = ['inprogress']
+        de_doc.current_revision.localization_tags.set(*expected_l10n_tags)
+        de_doc.tags.set(*expected_tags)
+        de_doc.current_revision.review_tags.set(*expected_review_tags)
+
         # Ensure the doc's json field is empty at first
         eq_(None, doc.json)
 
@@ -144,13 +151,35 @@ class DocumentTests(TestCase):
         saved_doc = Document.objects.get(pk=doc.pk)
         eq_(json.dumps(data), saved_doc.json)
 
-        # Finally, check on a few fields stored in JSON
+        # Check the fields stored in JSON of the English doc
+        # (the fields are created in build_json_data in models.py)
         eq_(doc.title, data['title'])
-        ok_('translations' in data)
+        eq_(doc.title, data['label'])
+        eq_(doc.get_absolute_url(), data['url'])
+        eq_(doc.id, data['id'])
+        eq_(doc.slug, data['slug'])
         result_tags = sorted([str(x) for x in data['tags']])
         eq_(expected_tags, result_tags)
         result_review_tags = sorted([str(x) for x in data['review_tags']])
         eq_(expected_review_tags, result_review_tags)
+        eq_(doc.locale, data['locale'])
+        eq_(doc.current_revision.summary, data['summary'])
+        eq_(doc.modified.isoformat(), data['modified'])
+        eq_(doc.current_revision.created.isoformat(), data['last_edit'])
+
+        # Check fields of translated doc
+        ok_('translations' in data)
+        eq_(de_doc.locale, data['translations'][0]['locale'])
+        result_l10n_tags = sorted([str(x) for x
+                           in data['translations'][0]['localization_tags']])
+        eq_(expected_l10n_tags, result_l10n_tags)
+        result_tags = sorted([str(x) for x in data['translations'][0]['tags']])
+        eq_(expected_tags, result_tags)
+        result_review_tags = sorted([str(x) for x
+                             in data['translations'][0]['review_tags']])
+        eq_(expected_review_tags, result_review_tags)
+        eq_(de_doc.current_revision.summary, data['translations'][0]['summary'])
+        eq_(de_doc.title, data['translations'][0]['title'])
 
     def test_document_is_template(self):
         """is_template stays in sync with the title"""
@@ -222,20 +251,10 @@ class DocumentTests(TestCase):
         _objects_eq(getattr(parent, direct_attr), [e1, e2])
         _objects_eq(getattr(child, direct_attr), [])
 
-    def test_firefox_version_inheritance(self):
-        """Assert the parent delegation of firefox_version works."""
-        self._test_m2m_inheritance(FirefoxVersion, 'firefox_versions',
-                                   'firefox_version_set')
-
-    def test_operating_system_inheritance(self):
-        """Assert the parent delegation of operating_system works."""
-        self._test_m2m_inheritance(OperatingSystem, 'operating_systems',
-                                   'operating_system_set')
-
     def test_category_inheritance(self):
         """A document's categories must always be those of its parent."""
-        some_category = CATEGORIES[1][0]
-        other_category = CATEGORIES[0][0]
+        some_category = Document.CATEGORIES[1][0]
+        other_category = Document.CATEGORIES[0][0]
 
         # Notice if somebody ever changes the default on the category field,
         # which would invalidate our test:
@@ -274,15 +293,6 @@ class DocumentTests(TestCase):
         i2 = enum_class(item_id=2)
         getattr(d, attr).add(i2)
         _objects_eq(getattr(d, attr), [i1, i2])
-
-    def test_firefox_versions(self):
-        """Test firefox_versions attr"""
-        self._test_int_sets_and_descriptors(FirefoxVersion, 'firefox_versions')
-
-    def test_operating_systems(self):
-        """Test operating_systems attr"""
-        self._test_int_sets_and_descriptors(OperatingSystem,
-                                            'operating_systems')
 
     def test_only_localizable_allowed_children(self):
         """You can't have children for a non-localizable document."""
@@ -421,66 +431,6 @@ class DocumentTestsWithFixture(TestCase):
 
     fixtures = ['test_users.json']
 
-    def test_majorly_outdated(self):
-        """Test the is_majorly_outdated method."""
-        trans = translated_revision(is_approved=True)
-        trans.save()
-        trans_doc = trans.document
-
-        # Make sure a doc returns False if it has no parent:
-        assert not trans_doc.parent.is_majorly_outdated()
-
-        assert not trans_doc.is_majorly_outdated()
-
-        # Add a parent revision of MAJOR significance:
-        r = revision(document=trans_doc.parent,
-                     significance=MAJOR_SIGNIFICANCE,
-                     is_approved=False)
-        r.save()
-        assert not trans_doc.is_majorly_outdated()
-
-        # Approve it:
-        r.is_approved = True
-        r.save()
-
-        assert trans_doc.is_majorly_outdated()
-
-    def test_majorly_outdated_with_unapproved_parents(self):
-        """Migrations might introduce translated revisions without based_on
-        set. Tolerate these.
-
-        If based_on of a translation's current_revision is None, the
-        translation should be considered out of date iff any
-        major-significance, approved revision to the English article exists.
-
-        """
-        # Create a parent doc with only an unapproved revision...
-        parent_rev = revision()
-        parent_rev.save()
-        # ...and a translation with a revision based on nothing.
-        trans = document(parent=parent_rev.document, locale='de')
-        trans.save()
-        trans_rev = revision(document=trans, is_approved=True)
-        trans_rev.save()
-
-        assert trans_rev.based_on is None, \
-            ('based_on defaulted to something non-None, which this test '
-             "wasn't expecting.")
-
-        assert not trans.is_majorly_outdated(), \
-            ('A translation was considered majorly out of date even though '
-             'the English document has never had an approved revision of '
-             'major significance.')
-
-        major_parent_rev = revision(document=parent_rev.document,
-                                    significance=MAJOR_SIGNIFICANCE,
-                                    is_approved=True)
-        major_parent_rev.save()
-
-        assert trans.is_majorly_outdated(), \
-            ('A translation was not considered majorly outdated when its '
-             "current revision's based_on value was None.")
-
     def test_redirect_document_non_redirect(self):
         """Assert redirect_document on non-redirects returns None."""
         eq_(None, document().redirect_document())
@@ -582,6 +532,7 @@ class DocumentTestsWithFixture(TestCase):
             if not p.pk in (trans_0.pk, trans_2.pk, trans_5.pk):
                 ok_('NeedsTranslation' in p.current_revision.tags)
                 ok_('TopicStub' in p.current_revision.tags)
+                ok_(p.current_revision.localization_in_progress())
 
     def test_repair_breadcrumbs(self):
         english_top = document(locale=settings.WIKI_DEFAULT_LANGUAGE,
@@ -842,56 +793,24 @@ class RelatedDocumentTests(TestCase):
 class GetCurrentOrLatestRevisionTests(TestCase):
     fixtures = ['test_users.json']
 
-    """Tests for get_current_or_latest_revision."""
+    """Tests for current_or_latest_revision."""
     def test_single_approved(self):
         """Get approved revision."""
         rev = revision(is_approved=True, save=True)
-        eq_(rev, get_current_or_latest_revision(rev.document))
-
-    def test_single_rejected(self):
-        """No approved revisions available should return None."""
-        rev = revision(is_approved=False)
-        eq_(None, get_current_or_latest_revision(rev.document))
+        eq_(rev, rev.document.current_or_latest_revision())
 
     def test_multiple_approved(self):
         """When multiple approved revisions exist, return the most recent."""
         r1 = revision(is_approved=True, save=True)
         r2 = revision(is_approved=True, save=True, document=r1.document)
-        eq_(r2, get_current_or_latest_revision(r2.document))
-
-    def test_approved_over_most_recent(self):
-        """Should return most recently approved when there is a more recent
-        unreviewed revision."""
-        r1 = revision(is_approved=True, save=True,
-                      created=datetime.now() - timedelta(days=1))
-        r2 = revision(is_approved=False, reviewed=None, save=True,
-                      document=r1.document)
-        eq_(r1, get_current_or_latest_revision(r2.document))
+        eq_(r2, r2.document.current_or_latest_revision())
 
     def test_latest(self):
-        """Return latest not-rejected revision when no current exists."""
-        r1 = revision(is_approved=False, reviewed=None, save=True,
-                      created=datetime.now() - timedelta(days=1))
-        r2 = revision(is_approved=False, reviewed=None, save=True,
-                      document=r1.document)
-        eq_(r2, get_current_or_latest_revision(r1.document))
-
-    def test_latest_rejected(self):
-        """Return latest rejected revision when no current exists."""
-        r1 = revision(is_approved=False, reviewed=None, save=True,
+        """Return latest revision when no current exists."""
+        r1 = revision(is_approved=False, save=True,
                       created=datetime.now() - timedelta(days=1))
         r2 = revision(is_approved=False, save=True, document=r1.document)
-        eq_(r2, get_current_or_latest_revision(r1.document,
-                                               reviewed_only=False))
-
-    def test_latest_unreviewed(self):
-        """Return latest unreviewed revision when no current exists."""
-        r1 = revision(is_approved=False, reviewed=None, save=True,
-                      created=datetime.now() - timedelta(days=1))
-        r2 = revision(is_approved=False, reviewed=None, save=True,
-                      document=r1.document)
-        eq_(r2, get_current_or_latest_revision(r1.document,
-                                               reviewed_only=False))
+        eq_(r2, r1.document.current_or_latest_revision())
 
 
 class DumpAndLoadJsonTests(TestCase):
@@ -1291,9 +1210,7 @@ class RenderExpiresTests(TestCase):
 
     @override_constance_settings(KUMASCRIPT_TIMEOUT=1.0)
     @mock.patch('wiki.kumascript.get')
-    @mock.patch_object(tasks.render_document, 'delay')
-    def test_render_stale(self, mock_render_document_delay,
-                          mock_kumascript_get):
+    def test_render_stale(self, mock_kumascript_get):
         mock_kumascript_get.return_value = ('MOCK CONTENT', None)
 
         now = datetime.now()
@@ -1303,14 +1220,16 @@ class RenderExpiresTests(TestCase):
         d1.last_rendered_at = earlier
         d1.render_expires = now - timedelta(seconds=100)
         d1.save()
+        eq_(Document.objects.get_by_stale_rendering().count(), 1)
 
-        Document.objects.render_stale()
+        lock = MemcacheLock('render-stale-documents-lock')
+        ok_(not lock.acquired)
+        tasks.render_stale_documents()
+        ok_(not lock.acquired)
+        eq_(Document.objects.get_by_stale_rendering().count(), 0)
 
         d1_fresh = Document.objects.get(pk=d1.pk)
-        ok_(mock_render_document_delay.called)
-        # HACK: Exact time comparisons suck, because database
-        ok_(d1_fresh.last_rendered_at > earlier - timedelta(seconds=1))
-        ok_(d1_fresh.last_rendered_at < earlier + timedelta(seconds=1))
+        ok_(d1_fresh.last_rendered_at > earlier)
 
     @override_constance_settings(KUMASCRIPT_TIMEOUT=1.0)
     @mock.patch('wiki.kumascript.get')
@@ -1327,7 +1246,7 @@ class RenderExpiresTests(TestCase):
         d1.render_expires = now - timedelta(seconds=100)
         d1.save()
 
-        Document.objects.render_stale(immediate=True)
+        tasks.render_stale_documents(immediate=True)
 
         d1_fresh = Document.objects.get(pk=d1.pk)
         ok_(not mock_render_document_delay.called)
@@ -1863,6 +1782,60 @@ class PageMoveTests(TestCase):
                           Document.objects.get,
                           id=child_redirect_id)
 
+    def test_fail_message(self):
+        """
+        When page move fails in moving one of the children, it
+        generates an informative exception message explaining which
+        child document failed.
+
+        """
+        top = revision(title='Test page-move error messaging',
+                       slug='test-move-error-messaging',
+                       is_approved=True,
+                       save=True)
+        top_doc = top.document
+
+        child = revision(title='Child to test page-move error messaging',
+                         slug='test-move-error-messaging/child',
+                         is_approved=True,
+                         save=True)
+        child_doc = child.document
+        child_doc.parent_topic = top_doc
+        child_doc.save()
+
+        grandchild = revision(title='Grandchild to test page-move error handling',
+                              slug='test-move-error-messaging/child/grandchild',
+                              is_approved=True,
+                              save=True)
+        grandchild_doc = grandchild.document
+        grandchild_doc.parent_topic = child_doc
+        grandchild_doc.save()
+
+        conflict = revision(title='Conflict page for page-move error handling',
+                            slug='test-move-error-messaging/moved/grandchild',
+                            is_approved=True,
+                            save=True)
+        conflict_doc = conflict.document
+
+        # TODO: Someday when we're on Python 2.7, we can use
+        # assertRaisesRegexp. Until then, we have to manually catch
+        # and inspect the exception.
+        try:
+            child_doc._move_tree('test-move-error-messaging/moved')
+        except PageMoveError as e:
+            err_strings = [
+                'with id %s' % grandchild_doc.id,
+                'https://developer.mozilla.org/%s/docs/%s' % (grandchild_doc.locale,
+                                                              grandchild_doc.slug),
+                "Exception type: <type 'exceptions.Exception'>",
+                'Exception message: Requested move would overwrite a non-redirect page.',
+                'in _move_tree',
+                'in _move_conflicts',
+                'raise Exception("Requested move would overwrite a non-redirect page.")',
+            ]
+            for s in err_strings:
+                ok_(s in e.args[0])
+
 
 class DocumentZoneTests(TestCase):
     """Tests for content zones in topic hierarchies"""
@@ -1939,7 +1912,7 @@ class DocumentParsingTests(TestCase):
                      content=src,
                      is_approved=True, save=True)
         d = r.document
-        
+
         result = d.get_section_content('Quick_Links')
         eq_(normalize_html(expected), normalize_html(result))
 
@@ -1978,10 +1951,53 @@ class DocumentParsingTests(TestCase):
                      content=src,
                      is_approved=True, save=True)
         d = r.document
-        
+
         eq_(normalize_html(body),
             normalize_html(d.get_body_html()))
         eq_(normalize_html(quick_links),
             normalize_html(d.get_quick_links_html()))
         eq_(normalize_html(subnav),
             normalize_html(d.get_zone_subnav_local_html()))
+
+    def test_bug_982174(self):
+        """Ensure build_json_data uses rendered HTML when available to extract
+        sections generated by KumaScript (bug 982174)"""
+        r = revision(title='Document with sections',
+                     slug='document-with-sections',
+                     is_approved=True, save=True)
+        d = r.document
+
+        # Save document with un-rendered content
+        d.html = """
+            <h2>Section 1</h2>
+            <p>Foo</p>
+            {{ h2_macro('Section 2') }}
+            <p>Bar</p>
+            <h2>Section 3</h2>
+            <p>Foo</p>
+        """
+        d.save()
+        json_data = d.build_json_data()
+        expected_sections = [
+            {'id': 'Section_1', 'title': 'Section 1'},
+            {'id': 'Section_3', 'title': 'Section 3'}
+        ]
+        eq_(expected_sections, json_data['sections'])
+
+        # Simulate kumascript rendering by updating rendered_html
+        d.rendered_html = """
+            <h2>Section 1</h2>
+            <p>Foo</p>
+            <h2>Section 2</h2>
+            <p>Bar</p>
+            <h2>Section 3</h2>
+            <p>Foo</p>
+        """
+        d.save()
+        json_data = d.build_json_data()
+        expected_sections = [
+            {'id': 'Section_1', 'title': 'Section 1'},
+            {'id': 'Section_2', 'title': 'Section 2'},
+            {'id': 'Section_3', 'title': 'Section 3'}
+        ]
+        eq_(expected_sections, json_data['sections'])

@@ -1,8 +1,12 @@
 # coding=utf-8
 
+import json
 import difflib
 import re
 import urllib
+
+from django.core.serializers.json import DjangoJSONEncoder
+from django.utils.html import conditional_escape
 
 import constance.config
 from jingo import register
@@ -10,16 +14,11 @@ import jinja2
 from pyquery import PyQuery as pq
 from tidylib import tidy_document
 from tower import ugettext as _
-import logging
-
-from django.contrib.contenttypes.models import ContentType
+from teamwork.shortcuts import build_policy_admin_links
 
 from sumo.urlresolvers import reverse
-import wiki
-import wiki.content
-from wiki import DIFF_WRAP_COLUMN
 
-from teamwork.shortcuts import build_policy_admin_links
+from .constants import DIFF_WRAP_COLUMN
 
 
 register.function(build_policy_admin_links)
@@ -107,22 +106,24 @@ def bugize_text(content):
 def format_comment(rev):
     """ Massages revision comment content after the fact """
 
-    prev_rev = rev.get_previous()
+    prev_rev = getattr(rev, 'previous_revision', None)
+    if prev_rev is None:
+        prev_rev = rev.get_previous()
     comment = bugize_text(rev.comment if rev.comment else "")
 
     #  If a page move, say so
     if prev_rev and prev_rev.slug != rev.slug:
-        comment += jinja2.Markup('<span class="slug-change">'
-                                 'Moved From <strong>%s</strong> '
-                                 'to <strong>%s</strong></span>') % (
-                                     prev_rev.slug, rev.slug)
+        comment += (jinja2.Markup('<span class="slug-change">'
+                                  'Moved From <strong>%s</strong> '
+                                  'to <strong>%s</strong></span>') %
+                    (prev_rev.slug, rev.slug))
 
     return comment
 
 
 @register.function
 def revisions_unified_diff(from_revision, to_revision):
-    if from_revision == None or to_revision == None:
+    if from_revision is None or to_revision is None:
         return "Diff is unavailable."
     fromfile = u'[%s] %s #%s' % (from_revision.document.locale,
                                  from_revision.document.title,
@@ -212,11 +213,48 @@ def selector_content_find(document, selector):
     """
     summary = ''
     try:
-      page = pq(document.rendered_html)
-      summary = page.find(selector).text()
+        page = pq(document.rendered_html)
+        summary = page.find(selector).text()
     except:
-      pass
+        pass
     return summary
+
+
+def _recursive_escape(value, esc=conditional_escape):
+    """
+    Recursively escapes strings in an object.
+
+    Traverses dict, list and tuples. These are the data structures supported
+    by the JSON encoder.
+    """
+    if isinstance(value, dict):
+        return type(value)((esc(k), _recursive_escape(v))
+                           for (k, v) in value.iteritems())
+    elif isinstance(value, (list, tuple)):
+        return type(value)(_recursive_escape(v) for v in value)
+    elif isinstance(value, basestring):
+        return esc(value)
+    elif isinstance(value, (int, long, float)) or value in (True, False, None):
+        return value
+    # We've exhausted all the types acceptable by the default JSON encoder.
+    # Django's improved JSON encoder handles a few other types, all of which
+    # are represented by strings. For these types, we apply JSON encoding
+    # immediately and then escape the result.
+    return esc(DjangoJSONEncoder().default(value))
+
+
+@register.filter
+def tojson(value):
+    """
+    Returns the JSON representation of the value.
+    """
+    try:
+        # If value contains custom subclasses of int, str, datetime, etc.
+        # arbitrary exceptions may be raised during escaping or serialization.
+        result = json.dumps(_recursive_escape(value), cls=DjangoJSONEncoder)
+    except Exception:
+        return ''
+    return jinja2.Markup(result)
 
 
 @register.function
@@ -231,7 +269,7 @@ def document_zone_management_links(user, document):
             user.has_perm('wiki.add_documentzone')):
         links['add'] = '%s?document=%s' % (
             reverse('admin:wiki_documentzone_add'), document.id)
-    
+
     # Enable "change" link if there's a zone, and the user has permission.
     if zone and user.has_perm('wiki.change_documentzone'):
         links['change'] = reverse('admin:wiki_documentzone_change',

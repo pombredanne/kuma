@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="{{ LANG }}" dir="{{ DIR }}" id="developer-mozilla-org">
+<html lang="{{ LANG }}" dir="{{ DIR }}">
 <head>
   <meta charset="utf-8">
   <title>{% block title %}{{ _('Mozilla Developer Network') }}{% endblock %}</title>
@@ -25,7 +25,7 @@
   {% block extrahead %}{% endblock %}
 </head>
 
-<body id="{% block body_attributes %}{% endblock %}" class="html-{{ DIR }} popup {% block bodyclass %}{% endblock %}">
+<body id="{% block body_attributes %}{% endblock %}" class="popup {% block bodyclass %}{% endblock %}">
 {% block content %}{% endblock %}
 
 {# js #}
@@ -33,14 +33,14 @@
 
 {% block site_js %}
 
-  {% if waffle.switch('jquery_upgrade') %}
+  {% if waffle.flag('jquery_upgrade') %}
     {{ js('jquery2') }}
   {% else %}
     {{ js('jquery1') }}
   {% endif %}
 
   {{ js('popup') }}
-  
+
 {% endblock %}
 {% block js %}{% endblock %}
 {# end js #}

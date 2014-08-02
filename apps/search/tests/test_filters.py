@@ -1,6 +1,4 @@
-from nose.tools import ok_
-
-from waffle.models import Flag
+from nose.tools import ok_, eq_
 
 from search.filters import (SearchQueryBackend, HighlightFilterBackend,
                             LanguageFilterBackend, DatabaseFilterBackend)
@@ -9,11 +7,8 @@ from search.views import SearchView
 
 
 class FilterTests(ElasticTestCase):
-    fixtures = ['test_users.json', 'wiki/documents.json']
-
-    def setUp(self):
-        super(FilterTests, self).setUp()
-        Flag.objects.create(name='elasticsearch', everyone=True)
+    fixtures = ['test_users.json', 'wiki/documents.json',
+                'search/filters.json']
 
     def test_search_query(self):
         class SearchQueryView(SearchView):
@@ -22,11 +17,10 @@ class FilterTests(ElasticTestCase):
         view = SearchQueryView.as_view()
         request = self.get_request('/en-US/search?q=article')
         response = view(request)
-        self.assertEqual(response.data['count'], 4)
-        self.assertEqual(len(response.data['documents']), 4)
-        self.assertEqual(response.data['documents'][1]['slug'],
-                         'article-title')
-        self.assertEqual(response.data['documents'][1]['locale'], 'en-US')
+        eq_(response.data['count'], 4)
+        eq_(len(response.data['documents']), 4)
+        eq_(response.data['documents'][0]['slug'], 'article-title')
+        eq_(response.data['documents'][0]['locale'], 'en-US')
 
     def test_highlight_filter(self):
 
@@ -36,7 +30,7 @@ class FilterTests(ElasticTestCase):
         view = HighlightView.as_view()
         request = self.get_request('/en-US/search?q=article')
         response = view(request)
-        ok_('<em>article</em>' in response.data['documents'][1]['excerpt'])
+        ok_('<em>article</em>' in response.data['documents'][0]['excerpt'])
 
     def test_language_filter(self):
         class LanguageView(SearchView):
@@ -44,46 +38,49 @@ class FilterTests(ElasticTestCase):
 
         view = LanguageView.as_view()
         request = self.get_request('/fr/search?q=article')
+        eq_(request.locale, 'fr')
         response = view(request)
-        self.assertEqual(response.data['count'], 1)
-        self.assertEqual(len(response.data['documents']), 1)
-        self.assertEqual(response.data['documents'][0]['locale'], 'fr')
+
+        eq_(response.data['count'], 7)
+        eq_(len(response.data['documents']), 7)
+        eq_(response.data['documents'][0]['locale'], 'fr')
 
         request = self.get_request('/en-US/search?q=article')
+        eq_(request.locale, 'en-US')
         response = view(request)
-        self.assertEqual(response.data['count'], 6)
-        self.assertEqual(len(response.data['documents']), 6)
-        self.assertEqual(response.data['documents'][0]['locale'], 'en-US')
+        eq_(response.data['count'], 6)
+        eq_(len(response.data['documents']), 6)
+        eq_(response.data['documents'][0]['locale'], 'en-US')
 
     def test_database_filter(self):
         class DatabaseFilterView(SearchView):
             filter_backends = (DatabaseFilterBackend,)
 
         view = DatabaseFilterView.as_view()
-        request = self.get_request('/en-US/search?topic=tagged')
+        request = self.get_request('/en-US/search?group=tagged')
         response = view(request)
-        self.assertEqual(response.data['count'], 2)
-        self.assertEqual(len(response.data['documents']), 2)
-        self.assertEqual(response.data['documents'][0]['slug'],
-                         'article-title')
-        self.assertEqual(response.data['filters'], [
+        eq_(response.data['count'], 2)
+        eq_(len(response.data['documents']), 2)
+        eq_(response.data['documents'][0]['slug'], 'article-title')
+        eq_(response.data['filters'], [
             {
                 'name': 'Group',
+                'slug': 'group',
                 'options': [{
                     'name': 'Tagged',
                     'slug': 'tagged',
                     'count': 2,
                     'active': True,
                     'urls': {
-                        'active': '/en-US/search?topic=tagged',
+                        'active': '/en-US/search?group=tagged',
                         'inactive': '/en-US/search',
                     },
                 }],
             },
         ])
 
-        request = self.get_request('/fr/search?topic=non-existent')
+        request = self.get_request('/fr/search?group=non-existent')
         response = view(request)
-        self.assertEqual(response.data['count'], 7)
-        self.assertEqual(len(response.data['documents']), 7)
-        self.assertEqual(response.data['documents'][0]['slug'], 'le-title')
+        eq_(response.data['count'], 7)
+        eq_(len(response.data['documents']), 7)
+        eq_(response.data['documents'][0]['slug'], 'le-title')

@@ -6,7 +6,6 @@ from django.shortcuts import redirect, render
 from django.views.i18n import javascript_catalog
 from django.views.decorators.cache import cache_page
 
-import jingo
 import badger
 
 
@@ -14,15 +13,26 @@ admin.autodiscover()
 badger.autodiscover()
 
 
+# Handle 404 and 500 errors
+def _error_page(request, status):
+    """Render error pages with jinja2."""
+    return render(request, '%d.html' % status, status=status)
+handler403 = lambda r: _error_page(r, 403)
+handler404 = lambda r: _error_page(r, 404)
+handler500 = lambda r: _error_page(r, 500)
+
 urlpatterns = patterns('',
    # Home / landing pages:
     ('', include('landing.urls')),
-    ('', include('devmo.urls')),
-    (r'^demos/', include('demos.urls')),
+    (r'^demos/', include('kuma.demos.urls')),
+    (r'^events/?', include('kuma.events.urls')),
     (r'^demos', lambda x: redirect('demos')),
 
     # Django admin:
     (r'^grappelli/', include('grappelli.urls')),
+    url(r'^admin/wiki/document/purge/',
+        'wiki.admin.purge_view',
+        name='wiki.admin_bulk_purge'),
     (r'^admin/', include('smuggler.urls')),
     (r'^admin/', include(admin.site.urls)),
 
@@ -54,12 +64,13 @@ urlpatterns = patterns('',
         'wiki.views.raw_file',
         name='wiki.raw_file'),
 
-    # Users
-    ('', include('users.urls')),
+    # Flagged content.
+    url(r'^flagged/$',
+        'contentflagging.views.flagged',
+        name='contentflagging.flagged'),
 
-    # BrowserID Realm
-    url(r'^\.well-known/browserid-realm', 'users.views.browserid_realm',
-        name='users.browserid-realm'),
+    # Users
+    ('', include('kuma.users.urls')),
 
     # Auth keys
     (r'^keys/', include('authkeys.urls')),
@@ -71,18 +82,12 @@ urlpatterns = patterns('',
     (r'^', include('tidings.urls')),
     (r'^humans.txt$', 'django.views.static.serve',
         {'document_root': settings.HUMANSTXT_ROOT, 'path': 'humans.txt'}),
+
+    url(r'^miel$', handler500, name='users.honeypot'),
 )
 
 if settings.DEBUG:
     urlpatterns += staticfiles_urlpatterns()
-
-# Handle 404 and 500 errors
-def _error_page(request, status):
-    """Render error pages with jinja2."""
-    return render(request, '%d.html' % status, status=status)
-handler403 = lambda r: _error_page(r, 403)
-handler404 = lambda r: _error_page(r, 404)
-handler500 = lambda r: _error_page(r, 500)
 
 if settings.SERVE_MEDIA:
     media_url = settings.MEDIA_URL.lstrip('/').rstrip('/')

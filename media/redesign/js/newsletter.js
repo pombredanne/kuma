@@ -1,22 +1,24 @@
 (function($) {
-	var $parent = $('#apps-newsletter-subscribe');
-	var $checkbox = $parent.find('#id_newsletter');
-	var $settings = $parent.find('.newsletter-setting');
-	var $agree = $parent.find('#id_agree');
-	var required = 'required';
+    'use strict';
 
-	if(!$checkbox.is(':checked')) {
-	    $settings.hide(0);
-	    $agree.removeAttr(required);
-	}
+    var $parent = $('#apps-newsletter-subscribe');
+    var $checkbox = $('#newsletter-toggle').find('input:checkbox');
+    var $settings = $parent.find('.newsletter-setting');
+    var $agree = $settings.filter('.agree').find('input:checkbox');
+    var required = 'required';
 
-	$checkbox.on('click', function() {
-	    if($checkbox.is(':checked')) {
-	        $settings.fadeIn();
-	        $agree.attr(required, required);
-	    } else {
-	        $settings.fadeOut();
-	        $agree.removeAttr(required);
-	    }
-	});
+    if(!$checkbox.is(':checked')) {
+        $settings.hide(0);
+        $agree.removeAttr(required);
+    }
+
+    $checkbox.on('click', function() {
+        if($checkbox.is(':checked')) {
+            $settings.fadeIn();
+            $agree.attr(required, required);
+        } else {
+            $settings.fadeOut();
+            $agree.removeAttr(required);
+        }
+    });
 })(jQuery);

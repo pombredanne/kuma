@@ -1,4 +1,3 @@
-{# vim: set ts=2 et sts=2 sw=2: #}
 {% extends "wiki/base.html" %}
 {% set title = _('Move "{t}"')|f(t=document.title) %}
 {% block title %}{{ page_title(title) }}{% endblock %}
@@ -7,6 +6,7 @@
 
 {% block site_css %}
     {{ super() }}
+    {{ css('wiki-edit') }}
     {{ css('jquery-ui') }}
 {% endblock %}
 
@@ -67,7 +67,7 @@
                 <input type="hidden" value="{{ document.locale }}" id="locale" name="locale"/>
               </dd>
               <dd class="parent-suggest-container">
-                <a href="javascript:;" class="move-lookup-link">{{ _('Lookup by Document Title') }}</a>
+                <button class="transparent move-lookup-link" type="button">{{ _('Lookup by Document Title') }}</button>
 
                 <div id="parent-suggest-input-container">
                     <input type="text" placeholder="{{ _('Parent Title') }}" id="parent-suggestion" disabled />
@@ -78,8 +78,8 @@
         </ul>
 
         <ul id="page-buttons">
-          <li><button class="btn-save" type="submit">{{ _('Move {d} Pages')|f(d=descendants_count) if descendants_count else _('Move Page') }}</button></li>
-          <li><a class="btn-discard" href="{{ url('wiki.document', document.full_path, locale=document.locale) }}">Cancel</a></li>
+          <li><button type="submit">{{ _('Move {d} Pages')|f(d=descendants_count) if descendants_count else _('Move Page') }}</button></li>
+          <li><a class="button negative" href="{{ url('wiki.document', document.full_path, locale=document.locale) }}">{{ _('Cancel') }}</a></li>
         </ul>
 
         {% if descendants_count: %}
@@ -99,5 +99,5 @@
 
 {% block js %}
   {{ js('jquery-ui') }}
-  <script src="{{ MEDIA_URL }}js/wiki-move.js?build={{ BUILD_ID_JS }}"></script>
+  {{ js('wiki-move', async=True) }}
 {% endblock %}

@@ -1,4 +1,3 @@
-{# vim: set ts=2 et sts=2 sw=2: #}
 {% extends "wiki/base.html" %}
 {% set title = _('Select language | {document}')|f(document=document.title) %}
 {% block title %}{{ page_title(title) }}{% endblock %}
@@ -9,7 +8,7 @@
 
     <h1>{{ _('Select a language to translate to:') }}</h1>
     <ul class="locales">
-      {% for locale in settings.LANGUAGE_CHOICES %}
+      {% for locale in settings.LANGUAGES %}
         {% if locale[0] != settings.WIKI_DEFAULT_LANGUAGE %}
           <li><a href="{{ url('wiki.translate', document_path=document.full_path)|urlparams(tolocale=locale[0]) }}">{{ locale[1] }} ({{ locale[0] }})</a></li>
         {% endif %}
@@ -17,5 +16,5 @@
     </ul>
 
   </article>
-  
+
 {% endblock %}

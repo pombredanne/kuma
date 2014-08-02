@@ -1,4 +1,3 @@
-{# vim: set ts=2 et sts=2 sw=2: #}
 {% extends "wiki/base.html" %}
 {# L10n: {n} is the revision number, {t} is the title of the document. {c} is the category. #}
 {% set title = _('Revision {n} | {t} | {c}')|f(n=revision.id, t=document.title, c=document.get_category_display()) %}
@@ -8,10 +7,11 @@
 
 {% block content %}
 
-  <article id="wiki-doc">
+  <article>
     <h1>{{ document.title }}</h1>
+
     <details class="h2" open="open">
-      <summary>{{ _('Revision Information') }}</summary>
+      <summary class="hidden">{{ _('Revision Information') }}</summary>
       <div class="revision-info">
         <ul>
           <li>
@@ -35,32 +35,14 @@
             <span>{{ revision.creator }}</span>
             {{ ban_link(revision.creator, request.user) }}
           </li>
-          <li class="revision-is-reviewed">
-            <mark>{{ _('Is reviewed?') }}</mark>
-            <span>{{ revision.reviewed|yesno }}</span>
+          <li>
+            <mark>{{ _('Is current revision?') }}</mark>
+            <span>{{ (revision == document.current_revision)|yesno }}</span>
           </li>
-          {% if revision.reviewed %}
-            <li class="revision-reviewed">
-              <mark>{{ _('Reviewed:') }}</mark>
-              <span>{{ datetimeformat(revision.reviewed, format='datetime') }}</span>
-            </li>
-            <li>
-              <mark>{{ _('Reviewed by:') }}</mark>
-              <span>{{ revision.reviewer }}</span>
-            </li>
-            <li class="revision-is-current">
-              <mark>{{ _('Is approved?') }}</mark>
-              <span>{{ revision.is_approved|yesno }}</span>
-            </li>
-            <li>
-              <mark>{{ _('Is current revision?') }}</mark>
-              <span>{{ (revision == document.current_revision)|yesno }}</span>
-            </li>
-            <li>
-              <mark>{{ _('Comment') }}</mark>
-              <span>{{ comment }}</span>
-            </li>
-          {% endif %}
+          <li>
+            <mark>{{ _('Comment') }}</mark>
+            <span>{{ comment }}</span>
+          </li>
           {#
           {% if user.is_authenticated() %}
             <li><a href="{{ url('wiki.new_revision_based_on', document.slug, revision.id) }}">{{ _('Edit article based on this revision') }}</a></li>
@@ -69,20 +51,21 @@
         </ul>
       </div>
     </details>
-    
-    <details>
+
+    <details><div class="wiki-block">
+      <h2><summary>{{ _('Revision Content') }}</summary></h2>
+      <article id="wikiArticle" class="text-content">
+        {{ revision.content_cleaned|safe }}
+      </article>
+    </div></details>
+
+    <details><div class="wiki-block">
       <h2><summary>{{ _('Revision Source') }}</summary></h2>
       <div id="doc-source">
-        <textarea readonly="readonly">{{ revision.content }}</textarea>
+        <pre class="brush:html">{{ revision.content }}</pre>
       </div>
-    </details>
+    </div></details>
 
-    <details>
-      <h2><summary>{{ _('Revision Content') }}</summary></h2>
-      <div id="doc-content">
-        <div class="page-content boxed">{{ revision.content|wiki_bleach }}</div>
-      </div>
-    </details>
+    <a href="{{ url('wiki.revert_document', document.full_path, revision.id) }}" class="button">{{ _('Revert to this revision') }}</a>
   </article>
-    
 {% endblock %}

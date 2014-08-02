@@ -1,11 +1,21 @@
 import operator
 from django.conf import settings
+from django.utils.datastructures import SortedDict
+
 from elasticutils import Q
 from elasticutils.contrib.django import F
 from rest_framework.filters import BaseFilterBackend
 from waffle import flag_is_active
 
-from search.models import DocumentType, Filter
+from search.models import DocumentType, Filter, FilterGroup
+
+
+def get_filters(getter_func):
+    filters = SortedDict()
+    for slug in FilterGroup.objects.values_list('slug', flat=True):
+        for filters_slug in getter_func(slug, []):
+            filters[filters_slug] = None
+    return filters.keys()
 
 
 class LanguageFilterBackend(BaseFilterBackend):
@@ -13,14 +23,54 @@ class LanguageFilterBackend(BaseFilterBackend):
     A django-rest-framework filter backend that filters the given queryset
     based on the current request's locale, or a different locale (or none at
     all) specified by query parameter
+
+    First, we bail if the locale query parameter is set to *. It's a short cut
+    for the macros search.
+
+    Then, if the current language is the standard language (English) we only
+    show those documents.
+
+    But if the current language is any non-standard language (non-English)
+    we're limiting the documents to either English or the requested
+    language, effectively filtering out all other languages. We also boost
+    the non-English documents to show up before the English ones.
     """
     def filter_queryset(self, request, queryset, view):
         locale = request.GET.get('locale', None)
         if '*' == locale:
             return queryset
-        if not locale or locale not in settings.MDN_LANGUAGES:
-            locale = request.locale
-        return queryset.filter(locale=locale)
+
+        query = queryset.build_search().get('query', {'match_all': {}})
+
+        if request.locale == settings.LANGUAGE_CODE:
+            locales = [request.locale]
+        else:
+            locales = [request.locale, settings.LANGUAGE_CODE]
+        query = {
+            'filtered': {
+                'query': query,
+                'filter': {
+                    'terms': {
+                        'locale': locales,
+                    }
+                }
+            }
+        }
+        return queryset.query_raw({
+            'boosting': {
+                'positive': query,
+                'negative': {
+                    'bool': {
+                        'must_not': {
+                            'term': {
+                                'locale': request.locale
+                            }
+                        }
+                    }
+                },
+                "negative_boost": 0.5
+            }
+        })
 
 
 class SearchQueryBackend(BaseFilterBackend):
@@ -121,7 +171,7 @@ class DatabaseFilterBackend(BaseFilterBackend):
         for serialized_filter in view.serialized_filters:
             filter_tags = serialized_filter['tags']
             filter_operator = Filter.OPERATORS[serialized_filter['operator']]
-            if serialized_filter['slug'] in view.current_topics:
+            if serialized_filter['slug'] in view.selected_filters:
 
                 if len(filter_tags) > 1:
                     tag_filters = []
@@ -159,9 +209,9 @@ class DatabaseFilterBackend(BaseFilterBackend):
         # only way to get to the currently applied filters
         # to use it to limit the facets filters below
         if view.drilldown_faceting:
-            facet_filter = queryset._build_query().get('filter', [])
+            facet_filter = queryset.build_search().get('filter', [])
         else:
-            facet_filter = unfiltered_queryset._build_query().get('filter', [])
+            facet_filter = unfiltered_queryset.build_search().get('filter', [])
 
         for facet_slug, facet_params in active_facets:
             facet_query = {

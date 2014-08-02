@@ -1,5 +1,5 @@
 """
-Deployment for MDN 
+Deployment for MDN
 
 Requires commander (https://github.com/oremj/commander) which is installed on
 the systems that need it.
@@ -13,6 +13,8 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from commander.deploy import task, hostgroups
 
 import commander_settings as settings
+
+DEVMO_CLEANUP_TAG = 'devmosplit'
 
 
 @task
@@ -36,6 +38,7 @@ def update_locales(ctx):
 def update_assets(ctx):
     with ctx.lcd(settings.SRC_DIR):
         ctx.local("python2.6 manage.py collectstatic --noinput")
+        ctx.local("python2.6 manage.py compilejsi18n")
         ctx.local("./scripts/compile-stylesheets")
         ctx.local("LANG=en_US.UTF-8 python2.6 manage.py compress_assets")
 
@@ -44,16 +47,9 @@ def update_assets(ctx):
 def database(ctx):
     with ctx.lcd(settings.SRC_DIR):
         ctx.local("python2.6 ./vendor/src/schematic/schematic migrations")  # schematic (old)
-        ctx.local("python2.6 manage.py migrate")                            # South (new)
+        ctx.local("python2.6 manage.py syncdb --noinput")                   # Django
+        ctx.local("python2.6 manage.py migrate --noinput")                  # South (new)
         ctx.local("python2.6 manage.py update_badges")
-
-
-#@task
-#def install_cron(ctx):
-#    with ctx.lcd(settings.SRC_DIR):
-#        ctx.local("python2.6 ./scripts/crontab/gen-crons.py -k %s -u apache > /etc/cron.d/.%s" %
-#                  (settings.WWW_DIR, settings.CRON_NAME))
-#        ctx.local("mv /etc/cron.d/.%s /etc/cron.d/%s" % (settings.CRON_NAME, settings.CRON_NAME))
 
 
 @task
@@ -98,8 +94,8 @@ def update_info(ctx):
         ctx.local("git log -3")
         ctx.local("git status")
         ctx.local("git submodule status")
-        ctx.local("python ./vendor/src/schematic/schematic -v migrations/")
-        ctx.local("python ./manage.py migrate --list")
+        ctx.local("python2.6 ./vendor/src/schematic/schematic -v migrations/")
+        ctx.local("python2.6 ./manage.py migrate --list")
         with ctx.lcd("locale"):
             ctx.local("svn info")
             ctx.local("svn status")
@@ -122,7 +118,6 @@ def update(ctx):
 
 @task
 def deploy(ctx):
-#    install_cron()
     checkin_changes()
     deploy_app()
     deploy_kumascript()

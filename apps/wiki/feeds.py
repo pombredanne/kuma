@@ -13,7 +13,7 @@ from django.utils.feedgenerator import (SyndicationFeed, Rss201rev2Feed,
 from django.utils.translation import ugettext as _
 
 from sumo.urlresolvers import reverse
-from devmo.models import UserProfile
+from kuma.users.models import UserProfile
 
 from wiki.helpers import diff_table, tag_diff_table, compare_url, colorize_diff
 from wiki.models import Document, Revision, AttachmentRevision
@@ -60,8 +60,7 @@ class DocumentsFeed(Feed):
 
     def item_author_link(self, document):
         return self.request.build_absolute_uri(
-            reverse('devmo.views.profile_view',
-                    args=(document.current_revision.creator.username,)))
+            document.current_revision.creator.get_absolute_url())
 
     def item_link(self, document):
         return self.request.build_absolute_uri(
@@ -271,7 +270,7 @@ class RevisionsFeed(DocumentsFeed):
         limit = int(self.request.GET.get('limit', DEFAULT_FEED_ITEMS))
         page = int(self.request.GET.get('page', 1))
 
-        start = ((page-1) * limit)
+        start = ((page - 1) * limit)
         finish = start + limit
 
         if not limit or limit > MAX_FEED_ITEMS:
@@ -368,9 +367,7 @@ class RevisionsFeed(DocumentsFeed):
         return '%s' % item.creator
 
     def item_author_link(self, item):
-        return self.request.build_absolute_uri(
-            reverse('devmo.views.profile_view',
-                    args=(item.creator.username,)))
+        return self.request.build_absolute_uri(item.creator.get_absolute_url())
 
     def item_categories(self, item):
         return []
@@ -403,9 +400,7 @@ class AttachmentsFeed(DocumentsFeed):
         return '%s' % item.creator
 
     def item_author_link(self, item):
-        return self.request.build_absolute_uri(
-            reverse('devmo.views.profile_view',
-                    args=(item.creator.username,)))
+        return self.request.build_absolute_uri(item.creator.get_absolute_url())
 
     def item_categories(self, item):
         return []

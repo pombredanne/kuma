@@ -3,18 +3,18 @@ from nose.tools import ok_, eq_
 from search.models import Filter, FilterGroup
 from search.tests import ElasticTestCase
 
-from search.fields import (DocumentExcerptField, SearchQueryField,
-                           TopicQueryField)
+from search.fields import DocumentExcerptField, SearchQueryField, SiteURLField
 from search.models import DocumentType
 from search.serializers import FilterSerializer, DocumentSerializer
 from search.queries import DocumentS
 
 
 class SerializerTests(ElasticTestCase):
-    fixtures = ['test_users.json', 'wiki/documents.json']
+    fixtures = ['test_users.json', 'wiki/documents.json',
+                'search/filters.json']
 
     def test_filter_serializer(self):
-        group = FilterGroup.objects.create(name='Group')
+        group = FilterGroup.objects.get(name='Group')
         filter_ = Filter.objects.create(name='Serializer', slug='serializer',
                                         group=group)
         filter_.tags.add('tag')
@@ -24,7 +24,7 @@ class SerializerTests(ElasticTestCase):
             'slug': 'serializer',
             'tags': ['tag'],
             'operator': 'OR',
-            'group': {'name': 'Group', 'order': 1}})
+            'group': {'name': 'Group', 'slug': 'group', 'order': 1}})
 
     def test_document_serializer(self):
         doc = DocumentS(DocumentType)
@@ -44,16 +44,20 @@ class FieldTests(ElasticTestCase):
 
     def test_DocumentExcerptField(self):
 
+        class Meta(object):
+            def __init__(self, highlight):
+                self.highlight = highlight
+
         class FakeValue(DocumentType):
             summary = 'just a summary'
-            _highlight = {'content': ['this is <em>matching</em> text']}
+            es_meta = Meta({'content': ['this is <em>matching</em> text']})
 
         field = DocumentExcerptField()
         eq_(field.to_native(FakeValue()), 'this is <em>matching</em> text')
 
         class FakeValue(DocumentType):
             summary = 'just a summary'
-            _highlight = {}
+            es_meta = Meta({})
 
         eq_(field.to_native(FakeValue()), FakeValue.summary)
 
@@ -68,10 +72,11 @@ class FieldTests(ElasticTestCase):
         field.context = {'request': request}
         eq_(field.to_native(None), 'test')
 
-    def test_TopicQueryField(self):
-        request = self.get_request('/?topic=spam&topic=eggs')
-        request.QUERY_PARAMS = request.GET
+    def test_SiteURLField(self):
+        class FakeValue(object):
+            slug = 'Firefox'
+            locale = 'de'
 
-        field = TopicQueryField()
-        field.context = {'request': request}
-        eq_(field.to_native(None), ['spam', 'eggs'])
+        field = SiteURLField('wiki.document', args=['slug'])
+        value = field.to_native(FakeValue())
+        ok_('/de/docs/Firefox' in value)

@@ -1,6 +1,6 @@
 {% from "includes/common_macros.html" import optimizely_script with context %}
 <!DOCTYPE html>
-<html lang="{{ LANG }}" dir="{{ DIR }}" id="developer-mozilla-org" class="redesign no-js">
+<html lang="{{ LANG }}" dir="{{ DIR }}" class="redesign no-js">
 <head prefix="og: http://ogp.me/ns#">
   <meta charset="utf-8">
   <meta http-equiv="X-UA-Compatible" content="IE=Edge">
@@ -11,40 +11,48 @@
   <title>{% block title %}{{ _('Mozilla Developer Network') }}{% endblock %}</title>
 
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="robots" content="index, follow">
+  <meta name="robots" content="{% block robots_value%}index, follow{% endblock %}">
   <link rel="home" href="{{ url('home') }}">
   <link rel="copyright" href="#copyright">
 
-  <link rel="stylesheet" href="//mozorg.cdn.mozilla.net/media/css/tabzilla-min.css">
+  <link href="//mozorg.cdn.mozilla.net/media/css/tabzilla-min.css" type="text/css" rel="stylesheet">
   {% block site_css %}
     {{ css('mdn', 'all') }}
+
     {% for style in styles %}
       {{ css(style) }}
     {% endfor %}
   {% endblock %}
 
   <!-- common social tags -->
+  {% set social_logo = request.build_absolute_uri('/media/redesign/img/opengraph-logo.png') %}
   <meta property="og:type" content="website">
-  <meta property="og:image" content="{{ request.build_absolute_uri('/media/redesign/img/opengraph-logo.png') }}">
-  <meta property="og:site_name" content="Mozilla Developer Network">
+  <meta property="og:image" content="{{ social_logo }}">
+  <meta property="og:site_name" content="{{ _('Mozilla Developer Network') }}">
   <meta name="twitter:card" content="summary">
-  <meta name="twitter:image" content="{{ request.build_absolute_uri('/media/redesign/img/opengraph-logo.png') }}">
-  <meta name="twitter:site" content="@mozhacks">
-  <meta name="twitter:creator" content="@mozhacks">
+  <meta name="twitter:image" content="{{ social_logo }}">
+  <meta name="twitter:site" content="@NewOnMDN">
+  <meta name="twitter:creator" content="@NewOnMDN">
 
   <link rel="search" type="application/opensearchdescription+xml" href="{{ settings.SITE_URL }}/{{ request.locale }}/search/xml" title="{{ _('Mozilla Developer Network') }}">
 
-  <!-- For third-generation iPad with high-resolution Retina display: -->
+  <!-- third-generation iPad with high-resolution Retina display: -->
   <link rel="apple-touch-icon-precomposed" sizes="144x144" href="{{ MEDIA_URL }}redesign/img/favicon144.png">
-  <!-- For iPhone with high-resolution Retina display: -->
+  <!-- iPhone with high-resolution Retina display: -->
   <link rel="apple-touch-icon-precomposed" sizes="114x114" href="{{ MEDIA_URL }}redesign/img/favicon114.png">
-  <!-- For first- and second-generation iPad: -->
+  <!-- first- and second-generation iPad: -->
   <link rel="apple-touch-icon-precomposed" sizes="72x72" href="{{ MEDIA_URL }}redesign/img/favicon72.png">
-  <!-- For non-Retina iPhone, iPod Touch, and Android 2.1+ devices: -->
+  <!-- non-Retina iPhone, iPod Touch, and Android 2.1+ devices: -->
   <link rel="apple-touch-icon-precomposed" href="{{ MEDIA_URL }}redesign/img/favicon57.png">
-  <!-- Basic favicon -->
-  <link rel="shortcut icon" href="{{ MEDIA_URL }}redesign/img/favicon32.png">
-
+  <!-- basic favicon -->
+  {% if request.META.SERVER_NAME in settings.PRODUCTION_URL %}
+    {% set favicon_suffix = '' %}
+  {% elif request.META.SERVER_NAME in settings.STAGING_URL %}
+    {% set favicon_suffix = '-staging' %}
+  {% else %}
+    {% set favicon_suffix = '-local' %}
+  {% endif %}
+  <link rel="shortcut icon" href="{{ MEDIA_URL }}redesign/img/favicon32{{ favicon_suffix }}.png">
   <!--[if IE]>
   <meta http-equiv="imagetoolbar" content="no">
   <script src="{{ MEDIA_URL }}js/libs/html5.js"></script>
@@ -56,7 +64,7 @@
     {% include "includes/google_analytics.html" %}
   {% endif %}
 </head>
-<body {% block body_attributes %}{% endblock %} class="html-{{ DIR }} {% block bodyclass %}{% endblock %}">
+<body {% block body_attributes %}{% endblock %} class="{% block bodyclass %}{% endblock %}">
 
   {% include "includes/config.html" %}
 
@@ -67,7 +75,7 @@
   {% endif %}
 
   <ul id="nav-access">
-    <li><a href="#content">{{ _('Skip to main content') }}</a></li>
+    <li><a href="#{% block main_content_id %}content{% endblock %}" id="skip-main">{{ _('Skip to main content') }}</a></li>
     <li><a id="skip-language" href="#language">{{ _('Select language') }}</a></li>
     {% if not is_sphinx %}
       <li><a href="#q" id="skip-search">{{ _('Skip to search') }}</a></li>
@@ -78,7 +86,7 @@
   <header id="main-header"><div class="center">
 
     <div class="clear header-login">
-      <a href="//www.mozilla.org/" id="tabzilla">mozilla</a>
+      <a href="//www.mozilla.org/" id="tabzilla" class="no-track">mozilla</a>
       {% if not is_sphinx %}
         {% include "includes/login.html" %}
       {% endif %}
@@ -126,10 +134,10 @@
             </ul>
           </div>
         </div>
-      </li><li><a href="{{ devmo_url('Mozilla/Developer_Program') }}">{{ _('Developer Program') }}</a></li><li><a href="{{ devmo_url('Tools') }}">{{ _('Tools') }}</a></li><li><a href="{{ url('demos') }}">{{ _('Demos') }}</a></li>{#<li><a href="">{{ _('Developer Program') }}</a></li>#}{% if not is_sphinx %}<li class="main-nav-search"><form action="{{ url('search') }}" method="get" role="search">
+      </li><li><a href="{{ devmo_url('Tools') }}">{{ _('Tools') }}</a></li><li><a href="{{ url('demos') }}">{{ _('Demos') }}</a></li><li><a href="{{ devmo_url('Mozilla/Connect') }}">{{ _('Connect') }}</a></li>{% if not is_sphinx %}<li class="main-nav-search"><form action="{{ url('search') }}" method="get" role="search">
         <div class="search-wrap">
           <label for="main-q" class="offscreen">{{ _('Search') }}</label>
-          <input type="search" id="main-q" name="q" data-placeholder="{{ _('SEARCH') }}" data-value="{{ query }}" value="" />
+          <input type="search" id="main-q" name="q" data-placeholder="{{ _('Search') }}" data-value="{{ query }}" value="" />
           <span class="search-trigger"><i aria-hidden="true" class="icon-search"></i></span>&nbsp;
           <button type="submit" class="offscreen">{{ _('Search') }}</button>
         </div>
@@ -137,7 +145,7 @@
   </div></header>
 
   <!-- Content will go here -->
-  <main id="content" role="main"><div class="center clear">
+  <main id="content"><div class="center clear">
   {% block content %}{% endblock %}
   </div></main>
 
@@ -149,7 +157,7 @@
         <p>
           {% trans copyright_url=devmo_url('Project:MDN/About#Copyrights_and_licenses'), about_url=devmo_url('Project:MDN/About'), thisyear=thisyear() %}
           <bdi>&copy; 2005-{{ thisyear }} Mozilla Developer Network and individual contributors<br />
-          Content is available under <a href="{{ copyright_url }}">these licenses</a> &middot; <a href="{{ about_url }}">About MDN</a> &middot; <a href="//github.com/mozilla/kuma">Contribute to the code</a> &middot; <a href="//www.mozilla.org/privacy/policies/websites/">Privacy policy</a></bdi>
+          Content is available under <a href="{{ copyright_url }}">these licenses</a> &middot; <a href="{{ about_url }}">About MDN</a> &middot; <a href="//github.com/mozilla/kuma">Contribute to the code</a> &middot; <a href="//www.mozilla.org/privacy/websites/">Privacy policy</a></bdi>
           {% endtrans %}
         </p>
         {% endblock %}
@@ -165,18 +173,20 @@
   </div></footer>
 
   <!-- site js -->
+  {% if not waffle.flag('static-i18njs') %}
   <script src="{{ url('jsi18n') }}build:{{ BUILD_ID_JS }}"></script>
+  {% endif %}
+
   {% block site_js %}
-    <!--[if lte IE 8]><script src="/media/redesign/js/libs/selectivizr-1.0.2/selectivizr-build.js?build={{ BUILD_ID_JS }}"></script><div id="feature-test-old-ie"></div><![endif]-->
+    <!--[if lte IE 8]><script src="/media/redesign/js/libs/selectivizr-1.0.2/selectivizr-build.js?build={{ BUILD_ID_JS }}"></script><![endif]-->
 
-    {% if waffle.switch('jquery_upgrade') %}
-      {{ js('jquery2') }}
-    {% else %}
-      {{ js('jquery1') }}
+    {{ js('main') }}
+
+    {% if waffle.flag('ga_outbound_links') %}
+      <script>
+        mdn.analytics.trackOutboundLinks(document.body);
+      </script>
     {% endif %}
-
-    {{ js('redesign-main') }}
-    <script src="//mozorg.cdn.mozilla.net/{{ request.locale }}/tabzilla/tabzilla.js" async></script>
 
     {% for script in scripts %}
       {{ js(script) }}

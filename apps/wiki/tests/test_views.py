@@ -3,6 +3,7 @@ import datetime
 import json
 import base64
 import time
+import logging
 
 from urlparse import urlparse
 
@@ -38,30 +39,15 @@ from . import TestCaseBase, FakeResponse, make_test_file
 
 from authkeys.models import Key
 
+from wiki.constants import DOCUMENT_LAST_MODIFIED_CACHE_KEY_TMPL
 from wiki.content import get_seo_description
 from wiki.events import EditDocumentEvent
-from wiki.models import (VersionMetadata, Document, Revision, Attachment,
-                         DocumentZone,
-                         AttachmentRevision, DocumentAttachment, TOC_DEPTH_H4)
+from wiki.models import (Document, Revision, Attachment, DocumentZone,
+                         AttachmentRevision, DocumentAttachment)
 from wiki.tests import (doc_rev, document, new_document_data, revision,
                         normalize_html, create_template_test_users,
                         make_translation)
-from wiki.views import _version_groups, DOCUMENT_LAST_MODIFIED_CACHE_KEY_TMPL
 from wiki.forms import MIDAIR_COLLISION
-
-
-class VersionGroupTests(TestCaseBase):
-    def test_version_groups(self):
-        """Make sure we correctly set up browser/version mappings for the JS"""
-        versions = [VersionMetadata(1, 'Firefox 4.0', 'Firefox 4.0', 'fx4',
-                                    5.0, False),
-                    VersionMetadata(2, 'Firefox 3.5-3.6', 'Firefox 3.5-3.6',
-                                    'fx35', 4.0, False),
-                    VersionMetadata(4, 'Firefox Mobile 1.1',
-                                    'Firefox Mobile 1.1', 'm11', 2.0, False)]
-        want = {'fx': [(4.0, '35'), (5.0, '4')],
-                'm': [(2.0, '11')]}
-        eq_(want, _version_groups(versions))
 
 
 class RedirectTests(TestCaseBase):
@@ -72,10 +58,26 @@ class RedirectTests(TestCaseBase):
     def test_redirect_suppression(self):
         """The document view shouldn't redirect when passed redirect=no."""
         redirect, _ = doc_rev('REDIRECT <a class="redirect" '
-                              'href="http://smoo/">smoo</a>')
+                              'href="/en-US/docs/blah">smoo</a>')
         url = redirect.get_absolute_url() + '?redirect=no'
         response = self.client.get(url, follow=True)
         self.assertContains(response, 'REDIRECT ')
+
+    def test_redirects_only_internal(self):
+        """Ensures redirects cannot be used to link to other sites"""
+        redirect, _ = doc_rev('REDIRECT <a class="redirect" '
+                              'href="//davidwalsh.name">DWB</a>')
+        url = redirect.get_absolute_url()
+        response = self.client.get(url, follow=True)
+        self.assertContains(response, 'DWB')
+
+    def test_redirects_only_internal_2(self):
+        """Ensures redirects cannot be used to link to other sites"""
+        redirect, _ = doc_rev('REDIRECT <a class="redirect" '
+                              'href="http://davidwalsh.name">DWB</a>')
+        url = redirect.get_absolute_url()
+        response = self.client.get(url, follow=True)
+        self.assertContains(response, 'DWB')
 
     def test_self_redirect_suppression(self):
         """The document view shouldn't redirect to itself."""
@@ -206,6 +208,10 @@ class ViewTests(TestCaseBase):
                                     locale=settings.WIKI_DEFAULT_LANGUAGE),
                             limit='all')
         resp = self.client.get(all_url)
+        eq_(403, resp.status_code)
+
+        self.client.login(username='testuser', password='testpass')
+        resp = self.client.get(all_url)
         eq_(200, resp.status_code)
 
     def test_toc_view(self):
@@ -238,7 +244,7 @@ class ViewTests(TestCaseBase):
                            save=True,
                            is_redirect=is_redir)
             if is_redir:
-                content = 'REDIRECT <a class="redirect" href="x">Blah</a>'
+                content = 'REDIRECT <a class="redirect" href="/en-US/blah">Blah</a>'
             else:
                 content = test_content
                 revision(document=doc,
@@ -327,7 +333,7 @@ class ViewTests(TestCaseBase):
         """)
         resp = self.client.get(r.get_absolute_url())
         page = pq(resp.content)
-        ct = page.find('#doc-content .page-content').html()
+        ct = page.find('#wikiArticle').html()
         ok_('<svg>' not in ct)
         ok_('<a href="#">Hahaha</a>' in ct)
 
@@ -410,45 +416,64 @@ class ConditionalGetTests(TestCaseBase):
     def test_last_modified(self):
         """Ensure the last-modified stamp of a document is cached"""
 
-        self.d, self.r = doc_rev()
-        self.url = reverse('wiki.document',
-                           args=[self.d.slug],
-                           locale=settings.WIKI_DEFAULT_LANGUAGE)
+        doc, rev = doc_rev()
+        get_url = reverse('wiki.document',
+                          args=[doc.slug],
+                          locale=settings.WIKI_DEFAULT_LANGUAGE)
 
         # There should be no last-modified date cached for this document yet.
         cache_key = (DOCUMENT_LAST_MODIFIED_CACHE_KEY_TMPL %
-                     self.d.natural_cache_key)
+                     doc.natural_cache_key)
         ok_(not cache.get(cache_key))
 
         # Now, try a request, and ensure that the last-modified header is
         # present.
-        response = self.client.get(self.url, follow=False)
+        response = self.client.get(get_url, follow=False)
         ok_(response.has_header('last-modified'))
         last_mod = response['last-modified']
 
         # Try another request, using If-Modified-Since. THis should be a 304
-        response = self.client.get(self.url, follow=False,
+        response = self.client.get(get_url, follow=False,
                                    HTTP_IF_MODIFIED_SINCE=last_mod)
         eq_(304, response.status_code)
 
         # Finally, ensure that the last-modified was cached.
         cached_last_mod = cache.get(cache_key)
-        eq_(self.d.modified.strftime('%s'), cached_last_mod)
+        eq_(doc.modified.strftime('%s'), cached_last_mod)
 
         # Let the clock tick, so the last-modified will change on edit.
         time.sleep(1.0)
 
         # Edit the document, ensure the last-modified has been invalidated.
-        revision(document=self.d, content="New edits", save=True)
+        revision(document=doc, content="New edits", save=True)
         ok_(not cache.get(cache_key))
 
         # This should be another 304, but the last-modified in response and
         # cache should have changed.
-        response = self.client.get(self.url, follow=False,
+        response = self.client.get(get_url, follow=False,
                                    HTTP_IF_MODIFIED_SINCE=last_mod)
         eq_(200, response.status_code)
         ok_(last_mod != response['last-modified'])
         ok_(cached_last_mod != cache.get(cache_key))
+
+    def test_deletion_clears_last_modified(self):
+        """Deleting a page clears any last-modified caching"""
+        # Setup mostly the same as previous test, to get a doc and set
+        # last-modified info.
+        doc, rev = doc_rev()
+        self.url = reverse('wiki.document',
+                           args=[doc.slug],
+                           locale=settings.WIKI_DEFAULT_LANGUAGE)
+        cache_key = (DOCUMENT_LAST_MODIFIED_CACHE_KEY_TMPL %
+                     doc.natural_cache_key)
+        ok_(not cache.get(cache_key))
+        response = self.client.get(self.url, follow=False)
+        ok_(cache.get(cache_key))
+
+        # Now delete the doc and make sure there's no longer
+        # last-modified data in the cache for it afterward.
+        doc.delete()
+        ok_(not cache.get(cache_key))
 
 
 class ReadOnlyTests(TestCaseBase):
@@ -457,7 +482,7 @@ class ReadOnlyTests(TestCaseBase):
 
     def setUp(self):
         super(ReadOnlyTests, self).setUp()
-        self.d, self.r = doc_rev()
+        self.d, r = doc_rev()
         self.edit_url = reverse('wiki.edit_document', args=[self.d.full_path])
 
     def test_everyone(self):
@@ -1001,7 +1026,7 @@ class DocumentEditingTests(TestCaseBase):
             found_selected = False
             if opt_element.attr('selected'):
                 found_selected = True
-                eq_(str(TOC_DEPTH_H4), opt_element.attr('value'))
+                eq_(str(Revision.TOC_DEPTH_H4), opt_element.attr('value'))
         if not found_selected:
             raise AssertionError("No ToC depth initially selected.")
 
@@ -1154,25 +1179,6 @@ class DocumentEditingTests(TestCaseBase):
                                     args=[changed_slug]),
                            data)
         eq_(302, resp.status_code)
-
-    def test_changing_metadata(self):
-        """Changing metadata works as expected."""
-        self.client.login(username='admin', password='testpass')
-        d, r = doc_rev()
-        data = new_document_data()
-        data.update({'firefox_versions': [1, 2, 3],
-                     'operating_systems': [1, 3],
-                     'form': 'doc'})
-        self.client.post(reverse('wiki.edit_document', args=[d.slug]), data)
-        eq_(3, d.firefox_versions.count())
-        eq_(2, d.operating_systems.count())
-        data.update({'firefox_versions': [1, 2],
-                     'operating_systems': [2],
-                     'form': 'doc'})
-        self.client.post(reverse('wiki.edit_document', args=[data['slug']]),
-                         data)
-        eq_(2, d.firefox_versions.count())
-        eq_(1, d.operating_systems.count())
 
     def test_invalid_slug(self):
         """Slugs cannot contain "$", but can contain "/"."""
@@ -1658,12 +1664,53 @@ class DocumentEditingTests(TestCaseBase):
         es_d = Document.objects.get(locale=foreign_locale, slug=foreign_slug)
         eq_(r.toc_depth, es_d.current_revision.toc_depth)
 
-        # Go to edit the translation, ensure the the slug is correct
-        response = self.client.get(reverse('wiki.edit_document',
-                                           args=[foreign_slug],
-                                           locale=foreign_locale))
-        page = pq(response.content)
-        eq_(page.find('input[name=slug]')[0].value, foreign_slug)
+    @override_constance_settings(KUMASCRIPT_TIMEOUT=1.0)
+    def test_translate_rebuilds_source_json(self):
+        self.client.login(username='admin', password='testpass')
+        # Create an English original and a Spanish translation.
+        en_slug = 'en-doc'
+        es_locale = 'es'
+        es_slug = 'es-doc'
+        en_doc = document(title='EN Doc',
+                          slug=en_slug,
+                          is_localizable=True,
+                          locale=settings.WIKI_DEFAULT_LANGUAGE)
+        en_doc.save()
+        en_doc.render()
+
+        en_doc = Document.objects.get(locale=settings.WIKI_DEFAULT_LANGUAGE,
+                                      slug=en_slug)
+        old_en_json = json.loads(en_doc.json)
+
+        r = revision(document=en_doc)
+        r.save()
+        translation_data = new_document_data()
+        translation_data['title'] = 'ES Doc'
+        translation_data['slug'] = es_slug
+        translation_data['content'] = 'This is the content'
+        translation_data['is_localizable'] = False
+        translation_data['form'] = 'both'
+        translate_url = reverse('wiki.document', args=[en_slug],
+                                locale=settings.WIKI_DEFAULT_LANGUAGE)
+        translate_url += '$translate?tolocale=' + es_locale
+        response = self.client.post(translate_url, translation_data)
+        # Sanity to make sure the translate succeeded.
+        self.assertRedirects(response, reverse('wiki.document',
+                                               args=[es_slug],
+                                               locale=es_locale))
+        es_doc = Document.objects.get(locale=es_locale,
+                                      slug=es_slug)
+        es_doc.render()
+
+        new_en_json = json.loads(Document.objects.get(pk=en_doc.pk).json)
+
+        ok_('translations' in new_en_json)
+        ok_(translation_data['title'] in [t['title'] for t in \
+                                          new_en_json['translations']])
+        es_translation_json = [t for t in new_en_json['translations'] if \
+                               t['title'] == translation_data['title']][0]
+        eq_(es_translation_json['last_edit'],
+            es_doc.current_revision.created.isoformat())
 
     def test_slug_translate(self):
         """Editing a translated doc keeps the correct slug"""
@@ -2211,14 +2258,14 @@ class DocumentEditingTests(TestCaseBase):
         doc = _create_doc('testdiscarddoc', settings.WIKI_DEFAULT_LANGUAGE)
         response = self.client.get(reverse('wiki.edit_document',
                                            args=[doc.slug], locale=doc.locale))
-        eq_(pq(response.content).find('#btn-discard').attr('href'),
+        eq_(pq(response.content).find('.btn-discard').attr('href'),
             reverse('wiki.document', args=[doc.slug], locale=doc.locale))
 
         # Test that the 'discard button on a new translation goes
         # to the en-US page'
         response = self.client.get(reverse('wiki.translate',
                                            args=[doc.slug], locale=doc.locale) + '?tolocale=es')
-        eq_(pq(response.content).find('#btn-discard').attr('href'),
+        eq_(pq(response.content).find('.btn-discard').attr('href'),
             reverse('wiki.document', args=[doc.slug], locale=doc.locale))
 
         # Test that the 'discard' button on an existing translation goes
@@ -2227,14 +2274,14 @@ class DocumentEditingTests(TestCaseBase):
         response = self.client.get(reverse('wiki.edit_document',
                                            args=[foreign_doc.slug],
                                            locale=foreign_doc.locale))
-        eq_(pq(response.content).find('#btn-discard').attr('href'),
+        eq_(pq(response.content).find('.btn-discard').attr('href'),
             reverse('wiki.document', args=[foreign_doc.slug],
                     locale=foreign_doc.locale))
 
         # Test new
         response = self.client.get(reverse('wiki.new_document',
                                            locale=settings.WIKI_DEFAULT_LANGUAGE))
-        eq_(pq(response.content).find('#btn-discard').attr('href'),
+        eq_(pq(response.content).find('.btn-discard').attr('href'),
             reverse('wiki.new_document',
                     locale=settings.WIKI_DEFAULT_LANGUAGE))
 
@@ -2296,28 +2343,28 @@ class DocumentWatchTests(TestCaseBase):
 
     def test_watch_GET_405(self):
         """Watch document with HTTP GET results in 405."""
-        response = get(self.client, 'wiki.document_watch',
+        response = get(self.client, 'wiki.subscribe_document',
                        args=[self.document.slug])
         eq_(405, response.status_code)
 
     def test_unwatch_GET_405(self):
         """Unwatch document with HTTP GET results in 405."""
-        response = get(self.client, 'wiki.document_unwatch',
+        response = get(self.client, 'wiki.subscribe_document',
                        args=[self.document.slug])
         eq_(405, response.status_code)
 
     def test_watch_unwatch(self):
         """Watch and unwatch a document."""
         user = User.objects.get(username='testuser')
+
         # Subscribe
-        response = post(self.client, 'wiki.document_watch',
-                       args=[self.document.slug])
+        response = post(self.client, 'wiki.subscribe_document', args=[self.document.slug])
         eq_(200, response.status_code)
         assert EditDocumentEvent.is_notifying(user, self.document), \
             'Watch was not created'
+
         # Unsubscribe
-        response = post(self.client, 'wiki.document_unwatch',
-                       args=[self.document.slug])
+        response = post(self.client, 'wiki.subscribe_document', args=[self.document.slug])
         eq_(200, response.status_code)
         assert not EditDocumentEvent.is_notifying(user, self.document), \
             'Watch was not destroyed'
@@ -2846,13 +2893,12 @@ class MindTouchRedirectTests(TestCaseBase):
             eq_('http://testserver%s' % doc['expected'], resp['Location'])
 
     def test_view_param(self):
-        raise SkipTest("WTF does the spot check work but test doesn't?")
         d = document()
         d.locale = settings.WIKI_DEFAULT_LANGUAGE
         d.slug = 'HTML/HTML5'
         d.title = 'HTML 5'
         d.save()
-        mt_url = '/en/%s?view=edit' % (d.slug,)
+        mt_url = '/en-US/%s?view=edit' % (d.slug,)
         resp = self.client.get(mt_url)
         eq_(301, resp.status_code)
         expected_url = 'http://testserver%s$edit' % d.get_absolute_url()
@@ -2924,7 +2970,7 @@ class AutosuggestDocumentsTests(TestCaseBase):
             {
                 'title': 'Something Redirect 8',
                 'slug': 'xx',
-                'html': 'REDIRECT <a class="redirect" href="http://davidwalsh.name">yo</a>'
+                'html': 'REDIRECT <a class="redirect" href="%s">yo</a>' % settings.SITE_URL
             },
             {
                 'title': 'My Template',

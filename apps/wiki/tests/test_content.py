@@ -18,7 +18,8 @@ from wiki.content import (CodeSyntaxFilter, DekiscriptMacroFilter,
                           get_content_sections, extract_css_classnames,
                           extract_html_attributes,
                           extract_kumascript_macro_names)
-from wiki.models import ALLOWED_TAGS, ALLOWED_ATTRIBUTES, Document
+from wiki.constants import ALLOWED_TAGS, ALLOWED_ATTRIBUTES
+from wiki.models import Document
 from wiki.tests import normalize_html, doc_rev, document
 from wiki.helpers import bugize_text
 
@@ -536,6 +537,22 @@ class ContentSectionToolTests(TestCase):
                   .filter(H3TOCFilter).serialize())
         eq_(normalize_html(expected), normalize_html(result))
 
+    def test_bug_925043(self):
+        '''Bug 925043 - Redesign TOC has a bunch of empty <code> tags in markup'''
+        doc_src = """
+            <h2 id="Print">Mastering <code>print</code></h2>
+            <code>print 'Hello World!'</code>
+        """
+        expected = """
+            <li>
+                <a href="#Print" rel="internal">Mastering<code>print</code></a>
+            </li>
+        """
+        result = (wiki.content
+                  .parse(doc_src)
+                  .filter(SectionTOCFilter).serialize())
+        eq_(normalize_html(expected), normalize_html(result))
+
     def test_dekiscript_macro_conversion(self):
         doc_src = u"""
             <span>Just a span</span>
@@ -822,7 +839,7 @@ class ContentSectionToolTests(TestCase):
         document(title=u'DOM/StyleSheet', locale=u'en-US',
                  slug=u'DOM/StyleSheet', save=True)
 
-        base_url = u'http://testserver/'
+        base_url = u'https://testserver'
         vars = dict(
             base_url=base_url,
             exist_url=d.get_absolute_url(),
@@ -1073,7 +1090,7 @@ class SearchParserTests(TestCase):
             <div class="%s">Test</div>
         """ % expected
         result = extract_css_classnames(content)
-        eq_(sorted(expected), sorted(list(result)))
+        eq_(sorted(expected), sorted(result))
 
     def test_html_attribute_extraction(self):
         expected = (
@@ -1087,7 +1104,7 @@ class SearchParserTests(TestCase):
             <div %s>Test</div>
         """ % expected
         result = extract_html_attributes(content)
-        eq_(sorted(expected), sorted(list(result)))
+        eq_(sorted(expected), sorted(result))
 
     def test_kumascript_macro_extraction(self):
         expected = ('foobar', 'barfoo', 'bazquux', 'banana')
@@ -1098,7 +1115,7 @@ class SearchParserTests(TestCase):
             <p>{{%s}}</p>
         """ % expected
         result = extract_kumascript_macro_names(content)
-        eq_(sorted(expected), sorted(list(result)))
+        eq_(sorted(expected), sorted(result))
 
 
 class GetSEODescriptionTests(TestCase):

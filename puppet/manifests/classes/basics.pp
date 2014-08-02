@@ -11,13 +11,14 @@ class basics {
           "libjpeg62", "libjpeg62-dev",
           "libfreetype6", "libfreetype6-dev",
           "libpng12-0", "libpng12-dev",
-          "libtidy-0.99-0", "libtidy-dev"]:
+          "libtidy-0.99-0", "libtidy-dev", "rlwrap", "make"]:
             ensure => installed,
             require => Exec['apt-get-update'];
     }
     exec {
         "deadsnakes-ppa":
             command => "/usr/bin/add-apt-repository --yes ppa:fkrull/deadsnakes && apt-get update -qq",
+            creates => '/etc/apt/sources.list.d/fkrull-deadsnakes-precise.list',
             require => Package["python-software-properties"];
     }
     package {
@@ -33,7 +34,8 @@ class apache {
         ensure => purged;
     }
     package { [ "apache2" ]:
-        ensure => present;
+        ensure => present,
+        require => Exec["apt-get-update"];
     }
 }
 
@@ -41,6 +43,7 @@ class apache {
 class mysql {
     package { [ "mysql-server", "libmysqlclient-dev" ]:
         ensure => present,
+        require => Exec["apt-get-update"];
     }
 }
 
@@ -48,6 +51,7 @@ class mysql {
 class memcache {
     package { [ "memcached", "libmemcached-dev" ]:
         ensure => present,
+        require => Exec["apt-get-update"];
     }
     service { "memcached":
         ensure => running,
@@ -60,6 +64,7 @@ class memcache {
 class rabbitmq {
     package { ["rabbitmq-server"]:
         ensure => present,
+        require => Exec["apt-get-update"];
     }
     service { "rabbitmq-server":
         ensure => running,
@@ -71,7 +76,12 @@ class rabbitmq {
 # Get foreman up and running
 class foreman {
     package { "foreman":
-        ensure   => 'installed',
-        provider => 'gem',
+        ensure   => '0.63.0',
+        provider => gem,
+    }
+    package { "posix-spawn":
+        ensure   => present,
+        provider => gem,
+        require => [ Package["make"] ]
     }
 }

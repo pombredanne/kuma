@@ -1,18 +1,121 @@
 # -*- coding: utf-8 -*-
 import operator
 from django.conf import settings
+from django.contrib.contenttypes.models import ContentType
+from django.contrib.contenttypes import generic
 from django.db import models
+from django.db.models.signals import post_delete
 from django.utils.html import strip_tags
+from django.utils import timezone
+from django.utils.functional import cached_property
+from django.template.defaultfilters import slugify
 
-from elasticutils.contrib.django import Indexable
-from taggit.managers import (TaggableManager, _TaggableManager,
-                             GenericTaggedItemBase)
+from elasticutils.contrib.django import MappingType, Indexable
+from elasticutils.contrib.django.tasks import index_objects
 
 from sumo.urlresolvers import reverse
 
-from search.index import SearchMappingType, register_mapping_type
 from wiki.models import Document
 from taggit_extras.managers import PrefetchTaggableManager
+
+from .decorators import register_mapping_type
+from .queries import DocumentS
+from .signals import delete_index
+
+
+class IndexManager(models.Manager):
+    """
+    The model manager to implement a couple of useful methods for handling
+    search indexes.
+    """
+    def get_current(self):
+        try:
+            return (self.filter(promoted=True, populated=True)
+                        .order_by('-created_at'))[0]
+        except (self.model.DoesNotExist, IndexError, AttributeError):
+            fallback_name = settings.ES_INDEXES['default']
+            return Index(name=fallback_name, populated=True, promoted=True)
+
+
+class Index(models.Model):
+    """
+    Model to store a bunch of metadata about search indexes including
+    a way to promote it to be picked up as the "current" one.
+    """
+    created_at = models.DateTimeField(default=timezone.now)
+    name = models.CharField(max_length=30, blank=True, null=True,
+                            help_text='The search index name, set to '
+                                      'the created date when left empty')
+    promoted = models.BooleanField(default=False)
+    populated = models.BooleanField(default=False)
+
+    objects = IndexManager()
+
+    class Meta:
+        verbose_name = 'Index'
+        verbose_name_plural = 'Indexes'
+        ordering = ['-created_at']
+
+    def save(self, *args, **kwargs):
+        if not self.name:
+            self.name = self.created_at.strftime('%Y-%m-%d-%H-%M-%S')
+        super(Index, self).save(*args, **kwargs)
+
+    def __unicode__(self):
+        return self.name
+
+    @cached_property
+    def successor(self):
+        try:
+            return self.get_next_by_created_at()
+        except (Index.DoesNotExist, ValueError):
+            return None
+
+    @cached_property
+    def prefixed_name(self):
+        "The name to use for the search index in ES"
+        return '%s-%s' % (settings.ES_INDEX_PREFIX, self.name)
+
+    def populate(self):
+        from .tasks import populate_index
+        populate_index.delay(self.pk)
+
+    def record_outdated(self, instance):
+        if self.successor:
+            return OutdatedObject.objects.create(index=self.successor,
+                                                 content_object=instance)
+
+    def promote(self):
+        rescheduled = []
+        for outdated_object in self.outdated_objects.all():
+            instance = outdated_object.content_object
+            label = ('%s.%s.%s' %
+                     (outdated_object.content_type.natural_key() +
+                      (instance.id,)))  # gives us 'wiki.document.12345'
+            if label in rescheduled:
+                continue
+            mappping_type = instance.get_mapping_type()
+            index_objects.delay(mappping_type, [instance.id])
+            rescheduled.append(label)
+        self.outdated_objects.all().delete()
+        self.promoted = True
+        self.save()
+
+    def demote(self):
+        self.promoted = False
+        self.save()
+
+
+post_delete.connect(delete_index, sender=Index,
+                    dispatch_uid='search.index.delete')
+
+
+class OutdatedObject(models.Model):
+    index = models.ForeignKey(Index, related_name='outdated_objects')
+    created_at = models.DateTimeField(default=timezone.now)
+    content_type = models.ForeignKey(ContentType)
+    object_id = models.PositiveIntegerField()
+    content_object = generic.GenericForeignKey('content_type', 'object_id')
 
 
 class FilterGroup(models.Model):
@@ -20,13 +123,24 @@ class FilterGroup(models.Model):
     A way to group different kinds of filters from each other.
     """
     name = models.CharField(max_length=255)
+    slug = models.CharField(max_length=255, blank=True, null=True,
+                            help_text='the slug to be used as the name of the '
+                                      'query parameter in the search URL')
     order = models.IntegerField(default=1,
-                                help_text='An integer defining which order the '
-                                          'filter group should show up in the '
-                                          'sidebar')
+                                help_text='An integer defining which order '
+                                          'the filter group should show up '
+                                          'in the sidebar')
 
     class Meta:
         ordering = ('-order', 'name')
+        unique_together = (
+            ('name', 'slug'),
+        )
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.name)
+        super(FilterGroup, self).save(*args, **kwargs)
 
     def __unicode__(self):
         return self.name
@@ -67,18 +181,21 @@ class Filter(models.Model):
                                             'to users or not.')
 
     class Meta(object):
-        unique_together = (('name', 'slug'),)
+        unique_together = (
+            ('name', 'slug'),
+        )
 
     def __unicode__(self):
         return self.name
 
     def get_absolute_url(self):
         path = reverse('search', locale=settings.LANGUAGE_CODE)
-        return '%s%s?topic=%s' % (settings.SITE_URL, path, self.slug)
+        return '%s%s?%s=%s' % (settings.SITE_URL, path,
+                               self.group.slug, self.slug)
 
 
 @register_mapping_type
-class DocumentType(SearchMappingType, Indexable):
+class DocumentType(MappingType, Indexable):
     excerpt_fields = ['summary', 'content']
     exclude_slugs = ['Talk:', 'User:', 'User_talk:', 'Template_talk:',
                      'Project_talk:']
@@ -86,6 +203,19 @@ class DocumentType(SearchMappingType, Indexable):
     @classmethod
     def get_model(cls):
         return Document
+
+    @classmethod
+    def get_index(cls):
+        return Index.objects.get_current().prefixed_name
+
+    @classmethod
+    def search(cls):
+        """Returns a typed S for this class.
+
+        :returns: an `S` for this DjangoMappingType
+
+        """
+        return DocumentS(cls)
 
     @classmethod
     def get_analysis(cls):
@@ -159,6 +289,15 @@ class DocumentType(SearchMappingType, Indexable):
             'locale': {'type': 'string', 'index': 'not_analyzed'},
             'modified': {'type': 'date'},
             'slug': {'type': 'string', 'index': 'not_analyzed'},
+            'parent': {
+                'type': 'nested',
+                'properties': {
+                    'id': {'type': 'long', 'index': 'not_analyzed'},
+                    'title': {'type': 'string', 'analyzer': 'kuma_title'},
+                    'slug': {'type': 'string', 'index': 'not_analyzed'},
+                    'locale': {'type': 'string', 'index': 'not_analyzed'},
+                }
+            },
             'summary': {
                 'type': 'string',
                 'analyzer': 'kuma_content',
@@ -211,6 +350,15 @@ class DocumentType(SearchMappingType, Indexable):
             doc['_boost'] = 4.0
         else:
             doc['_boost'] = 1.0
+        if obj.parent:
+            doc['parent'] = {
+                'id': obj.parent.id,
+                'title': obj.parent.title,
+                'locale': obj.parent.locale,
+                'slug': obj.parent.slug,
+            }
+        else:
+            doc['parent'] = {}
 
         return doc
 
@@ -230,7 +378,9 @@ class DocumentType(SearchMappingType, Indexable):
             excludes.append(models.Q(slug__icontains=exclude))
 
         return (model.objects
-                     .filter(is_template=False, is_redirect=False, deleted=False)
+                     .filter(is_template=False,
+                             is_redirect=False,
+                             deleted=False)
                      .exclude(reduce(operator.or_, excludes))
                      .values_list('id', flat=True))
 
@@ -251,15 +401,6 @@ class DocumentType(SearchMappingType, Indexable):
 
     def get_excerpt(self):
         for field in self.excerpt_fields:
-            if field in self._highlight:
-                return u'…'.join(self._highlight[field])
+            if field in self.es_meta.highlight:
+                return u'…'.join(self.es_meta.highlight[field])
         return self.summary
-
-    def get_url(self):
-        path = reverse('wiki.document', locale=self.locale, args=[self.slug])
-        return '%s%s' % (settings.SITE_URL, path)
-
-    def get_edit_url(self):
-        path = reverse('wiki.edit_document', locale=self.locale,
-                       args=[self.slug])
-        return '%s%s' % (settings.SITE_URL, path)

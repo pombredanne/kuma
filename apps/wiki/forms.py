@@ -1,9 +1,7 @@
-from datetime import datetime
-import json
 import re
 
 from django import forms
-from django.utils.encoding import smart_str
+from django.conf import settings
 from django.forms.widgets import CheckboxSelectMultiple
 
 from tower import ugettext_lazy as _lazy
@@ -12,16 +10,14 @@ from tower import ugettext as _
 import constance.config
 import magic
 
+from contentflagging.forms import ContentFlagForm
 from sumo.form_fields import StrippedCharField
 
 import wiki.content
-from wiki.models import (Document, Revision, FirefoxVersion, OperatingSystem,
-                         AttachmentRevision, valid_slug_parent,
-                         FIREFOX_VERSIONS, OPERATING_SYSTEMS, SIGNIFICANCES,
-                         GROUPED_FIREFOX_VERSIONS, GROUPED_OPERATING_SYSTEMS,
-                         CATEGORIES, REVIEW_FLAG_TAGS, RESERVED_SLUGS,
-                         TOC_DEPTH_CHOICES, LOCALIZATION_FLAG_TAGS)
-from wiki import SLUG_CLEANSING_REGEX
+from wiki.models import (Document, Revision,
+                         AttachmentRevision, valid_slug_parent)
+from .constants import (SLUG_CLEANSING_REGEX, REVIEW_FLAG_TAGS,
+                        LOCALIZATION_FLAG_TAGS, RESERVED_SLUGS)
 
 
 TITLE_REQUIRED = _lazy(u'Please provide a title.')
@@ -59,7 +55,8 @@ OTHER_COLLIDES = _lazy(u'Another document with this metadata already exists.')
 MIDAIR_COLLISION = _lazy(u'This document was modified while you were '
                          'editing it.')
 MIME_TYPE_INVALID = _lazy(u'Files of this type are not permitted.')
-MOVE_REQUIRED = _lazy(u"Changing this document's slug requires moving it and its children.")
+MOVE_REQUIRED = _lazy(u"Changing this document's slug requires "
+                      u"moving it and its children.")
 
 
 class DocumentForm(forms.ModelForm):
@@ -73,6 +70,7 @@ class DocumentForm(forms.ModelForm):
                               error_messages={'required': TITLE_REQUIRED,
                                               'min_length': TITLE_SHORT,
                                               'max_length': TITLE_LONG})
+
     slug = StrippedCharField(min_length=1, max_length=255,
                              widget=forms.TextInput(),
                              label=_lazy(u'Slug:'),
@@ -81,25 +79,7 @@ class DocumentForm(forms.ModelForm):
                                              'min_length': SLUG_SHORT,
                                              'max_length': SLUG_LONG})
 
-    firefox_versions = forms.MultipleChoiceField(
-                                label=_lazy(u'Firefox version:'),
-                                choices=[(v.id, v.long) for v in
-                                         FIREFOX_VERSIONS],
-                                initial=[v.id for v in
-                                         GROUPED_FIREFOX_VERSIONS[0][1]],
-                                required=False,
-                                widget=forms.CheckboxSelectMultiple())
-
-    operating_systems = forms.MultipleChoiceField(
-                                label=_lazy(u'Operating systems:'),
-                                choices=[(o.id, o.name) for o in
-                                         OPERATING_SYSTEMS],
-                                initial=[o.id for o in
-                                         GROUPED_OPERATING_SYSTEMS[0][1]],
-                                required=False,
-                                widget=forms.CheckboxSelectMultiple())
-
-    category = forms.ChoiceField(choices=CATEGORIES,
+    category = forms.ChoiceField(choices=Document.CATEGORIES,
                                  initial=10,
                                  # Required for non-translations, which is
                                  # enforced in Document.clean().
@@ -131,14 +111,6 @@ class DocumentForm(forms.ModelForm):
                 raise forms.ValidationError(SLUG_INVALID)
         return slug
 
-    def clean_firefox_versions(self):
-        data = self.cleaned_data['firefox_versions']
-        return [FirefoxVersion(item_id=int(x)) for x in data]
-
-    def clean_operating_systems(self):
-        data = self.cleaned_data['operating_systems']
-        return [OperatingSystem(item_id=int(x)) for x in data]
-
     class Meta:
         model = Document
         fields = ('title', 'slug', 'category', 'locale')
@@ -150,17 +122,9 @@ class DocumentForm(forms.ModelForm):
         if 'parent_topic' in self.cleaned_data:
             doc.parent_topic = self.cleaned_data['parent_topic']
         doc.save()
-        self.save_m2m()  # not strictly necessary since we didn't change
-                         # any m2m data since we instantiated the doc
-
-        if not parent_doc:
-            ffv = self.cleaned_data['firefox_versions']
-            doc.firefox_versions.all().delete()
-            doc.firefox_versions = ffv
-            os = self.cleaned_data['operating_systems']
-            doc.operating_systems.all().delete()
-            doc.operating_systems = os
-
+        # not strictly necessary since we didn't change
+        # any m2m data since we instantiated the doc
+        self.save_m2m()
         return doc
 
 
@@ -200,19 +164,10 @@ class RevisionForm(forms.ModelForm):
                                 'min_length': SUMMARY_SHORT,
                                 'max_length': SUMMARY_LONG})
 
-    showfor_data = {
-        'oses': [(unicode(c[0][0]), [(o.slug, unicode(o.name)) for
-                                    o in c[1]]) for
-                 c in GROUPED_OPERATING_SYSTEMS],
-        'versions': [(unicode(c[0][0]), [(v.slug, unicode(v.name)) for
-                                        v in c[1] if v.show_in_ui]) for
-                     c in GROUPED_FIREFOX_VERSIONS]}
-
     content = StrippedCharField(
                 min_length=5, max_length=300000,
                 label=_lazy(u'Content:'),
-                widget=forms.Textarea(attrs={'data-showfor':
-                                             json.dumps(showfor_data)}),
+                widget=forms.Textarea(),
                 error_messages={'required': CONTENT_REQUIRED,
                                 'min_length': CONTENT_SHORT,
                                 'max_length': CONTENT_LONG})
@@ -412,17 +367,6 @@ class RevisionForm(forms.ModelForm):
         return new_rev
 
 
-class ReviewForm(forms.Form):
-    comment = StrippedCharField(max_length=255, widget=forms.Textarea(),
-                                required=False, label=_lazy(u'Comment:'),
-                                error_messages={'max_length': COMMENT_LONG})
-
-    significance = forms.ChoiceField(
-                    label=_lazy(u'Significance:'),
-                    choices=SIGNIFICANCES, initial=SIGNIFICANCES[0][0],
-                    required=False, widget=forms.RadioSelect())
-
-
 class RevisionValidationForm(RevisionForm):
     """Created primarily to disallow slashes in slugs during validation"""
 
@@ -432,9 +376,9 @@ class RevisionValidationForm(RevisionForm):
 
         # "/", "?", and " " disallowed in form input
         if (u'' == original or
-            '/' in original or
-            '?' in original or
-            ' ' in original):
+                '/' in original or
+                '?' in original or
+                ' ' in original):
             is_valid = False
             raise forms.ValidationError(SLUG_INVALID)
 
@@ -446,7 +390,7 @@ class RevisionValidationForm(RevisionForm):
                     super(RevisionValidationForm, self).clean_slug())
 
         # Set the slug back to original
-        #if not is_valid:
+        # if not is_valid:
         self.cleaned_data['slug'] = self.data['slug'] = original
 
         return self.cleaned_data['slug']
@@ -470,7 +414,7 @@ class AttachmentRevisionForm(forms.ModelForm):
         uploaded_file.seek(0)
 
         if mime_type not in \
-               constance.config.WIKI_ATTACHMENT_ALLOWED_TYPES.split():
+                constance.config.WIKI_ATTACHMENT_ALLOWED_TYPES.split():
             raise forms.ValidationError(MIME_TYPE_INVALID)
         return self.cleaned_data['file']
 
@@ -492,16 +436,17 @@ class AttachmentRevisionForm(forms.ModelForm):
 
         return rev
 
+
 class TreeMoveForm(forms.Form):
     title = StrippedCharField(min_length=1, max_length=255,
-                                required=False,
-                                widget=forms.TextInput(
-                                    attrs={'placeholder': TITLE_PLACEHOLDER}),
-                                label=_lazy(u'Title:'),
-                                help_text=_lazy(u'Title of article'),
-                                error_messages={'required': TITLE_REQUIRED,
-                                                'min_length': TITLE_SHORT,
-                                                'max_length': TITLE_LONG})
+                              required=False,
+                              widget=forms.TextInput(
+                                  attrs={'placeholder': TITLE_PLACEHOLDER}),
+                              label=_lazy(u'Title:'),
+                              help_text=_lazy(u'Title of article'),
+                              error_messages={'required': TITLE_REQUIRED,
+                                              'min_length': TITLE_SHORT,
+                                              'max_length': TITLE_LONG})
     slug = StrippedCharField(min_length=1, max_length=255,
                              widget=forms.TextInput(),
                              label=_lazy(u'New slug:'),
@@ -534,9 +479,15 @@ class TreeMoveForm(forms.Form):
             try:
                 valid_slug_parent(slug, locale)
             except Exception, e:
-                raise forms.ValidationError(e.message)
+                raise forms.ValidationError(e.args[0])
         return cleaned_data
 
 
 class DocumentDeletionForm(forms.Form):
     reason = forms.CharField(widget=forms.Textarea(attrs={'autofocus': 'true'}))
+
+
+class DocumentContentFlagForm(ContentFlagForm):
+    flag_type = forms.ChoiceField(
+        choices=settings.WIKI_FLAG_REASONS,
+        widget=forms.RadioSelect)

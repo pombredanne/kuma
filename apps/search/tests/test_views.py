@@ -1,18 +1,13 @@
 from nose.tools import eq_
 
-from waffle.models import Flag
-
-from search.models import Filter, FilterGroup
+from search.models import Index, Filter, FilterGroup
 from search.tests import ElasticTestCase
 from search.views import SearchView
 
 
 class ViewTests(ElasticTestCase):
-    fixtures = ['test_users.json', 'wiki/documents.json']
-
-    def setUp(self):
-        super(ViewTests, self).setUp()
-        Flag.objects.create(name='elasticsearch', everyone=True)
+    fixtures = ['test_users.json', 'wiki/documents.json',
+                'search/filters.json']
 
     def test_search_rendering(self):
         """The search view """
@@ -43,13 +38,15 @@ class ViewTests(ElasticTestCase):
                       'slug': 'tagged',
                       'tags': ['tagged'],
                       'operator': 'OR',
-                      'group': {'name': 'Group', 'order': 1}}])
+                      'group': {'name': 'Group', 'slug': 'group', 'order': 1}
+                      }])
 
         test_view1 = Test1SearchView.as_view()
         test_view1(self.get_request('/en-US/'))
 
-        group = FilterGroup.objects.create(name='Group')
-        Filter.objects.create(name='Serializer', slug='serializer', group=group)
+        group = FilterGroup.objects.get(name='Group')
+        Filter.objects.create(name='Serializer', slug='serializer',
+                              group=group)
 
         class Test2SearchView(SearchView):
             filter_backends = ()
@@ -61,39 +58,41 @@ class ViewTests(ElasticTestCase):
                       'slug': 'tagged',
                       'tags': ['tagged'],
                       'operator': 'OR',
-                      'group': {'name': 'Group', 'order': 1}},
+                      'group': {'name': 'Group', 'slug': 'group', 'order': 1}},
                      {'name': 'Serializer',
                       'slug': 'serializer',
                       'tags': [],
                       'operator': 'OR',
-                      'group': {'name': 'Group', 'order': 1}}])
+                      'group': {'name': 'Group', 'slug': 'group', 'order': 1}
+                      }])
 
         test_view2 = Test2SearchView.as_view()
         test_view2(self.get_request('/en-US/'))
 
-    def test_current_topics(self):
+    def test_filters(self):
 
-        class TopicSearchView(SearchView):
+        class FilterSearchView(SearchView):
             expected = None
             filter_backends = ()
 
             def dispatch(self, *args, **kwargs):
-                super(TopicSearchView, self).dispatch(*args, **kwargs)
-                eq_(self.current_topics, self.expected)
+                super(FilterSearchView, self).dispatch(*args, **kwargs)
+                eq_(self.selected_filters, self.expected)
 
-        view = TopicSearchView.as_view(expected=['spam'])
-        view(self.get_request('/en-US/?topic=spam'))
+        view = FilterSearchView.as_view(expected=['spam'])
+        view(self.get_request('/en-US/?group=spam'))
 
-        # the topics are deduplicated
-        view = TopicSearchView.as_view(expected=['spam', 'eggs'])
-        view(self.get_request('/en-US/?topic=spam&topic=eggs'))
-        view(self.get_request('/en-US/?topic=spam&topic=eggs&topic=spam'))
+        # the filters are deduplicated
+        view = FilterSearchView.as_view(expected=['spam', 'eggs'])
+        view(self.get_request('/en-US/?group=spam&group=eggs'))
+        view(self.get_request('/en-US/?group=spam&group=eggs&group=spam'))
 
     def test_queryset(self):
 
         class QuerysetSearchView(SearchView):
             def list(self, *args, **kwargs):
-                response = super(QuerysetSearchView, self).list(*args, **kwargs)
+                response = super(QuerysetSearchView, self).list(*args,
+                                                                **kwargs)
                 # queryset content
                 eq_(self.object_list[0].title, 'an article title')
                 eq_(self.object_list[0].locale, 'en-US')
@@ -101,7 +100,7 @@ class ViewTests(ElasticTestCase):
                 # metadata
                 eq_(self.object_list.current_page, 1)
                 eq_(len(self.object_list.serialized_filters), 1)
-                eq_(self.object_list.topics, ['tagged'])
+                eq_(self.object_list.selected_filters, ['tagged'])
                 eq_(self.object_list.url, self.request.get_full_path())
 
                 # facets
@@ -114,7 +113,7 @@ class ViewTests(ElasticTestCase):
                 return response
 
         view = QuerysetSearchView.as_view()
-        request = self.get_request('/en-US/search?q=article&topic=tagged')
+        request = self.get_request('/en-US/search?q=article&group=tagged')
         view(request)
 
     def test_allowed_methods(self):
@@ -142,3 +141,11 @@ class ViewTests(ElasticTestCase):
             response = self.client.get('/en-US/search?q=' + q)
             eq_(response.status_code, 200)
             self.assertContains(response, 'camel-case-test')
+
+    def test_index(self):
+        self.client.login(username='admin', password='testpass')
+        response = self.client.get('/en-US/search')
+        eq_(response.status_code, 200)
+        self.assertContains(response,
+                            ('Search index: %s' %
+                             Index.objects.get_current().name))

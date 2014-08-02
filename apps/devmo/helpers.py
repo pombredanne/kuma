@@ -1,37 +1,59 @@
 import datetime
 import re
-import httplib
 import urllib
-import urlparse
-import socket
+from urlobject import URLObject
+import os
 
 from django.conf import settings
 from django.core.cache import cache
 from django.template import defaultfilters
+from django.utils.encoding import force_text
 from django.utils.html import strip_tags
+from django.utils.safestring import mark_safe
+from django.contrib.messages.storage.base import LEVEL_TAGS
 
 import bleach
 from jingo import register
 import jinja2
 import pytz
 from soapbox.models import Message
+from statici18n.utils import get_filename
+from django.contrib.staticfiles.storage import staticfiles_storage
 
-import utils
 from sumo.urlresolvers import split_path, reverse
 from wiki.models import Document
+
+from .utils import entity_decode
 
 
 # Yanking filters from Django.
 register.filter(strip_tags)
 register.filter(defaultfilters.timesince)
 register.filter(defaultfilters.truncatewords)
+register.filter(entity_decode)
 
-register.filter(utils.entity_decode)
+
+@register.function
+def inlinei18n(locale):
+    key = 'statici18n:%s' % locale
+    path = cache.get(key)
+    if path is None:
+        path = os.path.join(settings.STATICI18N_OUTPUT_DIR,
+                            get_filename(locale, settings.STATICI18N_DOMAIN))
+        cache.set(key, path, 60 * 60 * 24 * 30)
+    with staticfiles_storage.open(path) as i18n_file:
+        return mark_safe(i18n_file.read())
 
 
 @register.function
 def page_title(title):
     return u'%s | MDN' % title
+
+
+@register.filter
+def level_tag(message):
+    return jinja2.Markup(force_text(LEVEL_TAGS.get(message.level, ''),
+                                    strings_only=True))
 
 
 @register.filter
@@ -108,7 +130,7 @@ def devmo_url(context, path):
                     locale=settings.WIKI_DEFAULT_LANGUAGE, slug=path)
                 """ # TODO: redirect_document is coupled to doc view
                 follow redirects vs. update devmo_url calls
-                
+
                 target = parent.redirect_document()
                 if target:
                 parent = target
@@ -146,3 +168,13 @@ def get_soapbox_messages(url):
 @register.inclusion_tag('devmo/elements/soapbox_messages.html')
 def soapbox_messages(soapbox_messages):
     return {'soapbox_messages': soapbox_messages}
+
+
+@register.function
+def add_utm(url_, campaign, source='notification', medium='email'):
+    """Add the utm_* tracking parameters to a URL."""
+    url_obj = URLObject(url_).add_query_params({
+        'utm_campaign': campaign,
+        'utm_source': source,
+        'utm_medium': medium})
+    return str(url_obj)

@@ -1,6 +1,4 @@
 # coding=utf-8
-
-import logging
 import re
 import urllib
 from urllib import urlencode
@@ -18,6 +16,8 @@ import newrelic.agent
 from tower import ugettext as _
 
 from sumo.urlresolvers import reverse
+
+from .utils import locale_and_slug_from_path
 
 
 # Regex to extract language from MindTouch code elements' function attribute
@@ -201,7 +201,7 @@ def extract_css_classnames(content):
         elements.each(process_el)
     except:
         pass
-    return classnames
+    return list(classnames)
 
 
 @newrelic.agent.function_trace()
@@ -231,7 +231,7 @@ def extract_kumascript_macro_names(content):
         names.update(macro_re.findall(txt))
     except:
         pass
-    return names
+    return list(names)
 
 
 class ContentSectionTool(object):
@@ -368,6 +368,7 @@ class LinkAnnotationFilter(html5lib_Filter):
     def __init__(self, source, base_url):
         html5lib_Filter.__init__(self, source)
         self.base_url = base_url
+        self.base_url_parsed = urlparse(base_url)
 
     def __iter__(self):
         from wiki.models import Document
@@ -385,9 +386,10 @@ class LinkAnnotationFilter(html5lib_Filter):
                     continue
 
                 href = attrs['href']
-                if href.startswith(self.base_url):
+                href_parsed = urlparse(href)
+                if href_parsed.netloc == self.base_url_parsed.netloc:
                     # Squash site-absolute URLs to site-relative paths.
-                    href = '/%s' % href[len(self.base_url):]
+                    href = href_parsed.path
 
                 # Prepare annotations record for this path.
                 links[href] = dict(
@@ -439,9 +441,9 @@ class LinkAnnotationFilter(html5lib_Filter):
 
                 # Try to sort out the locale and slug through some of our
                 # redirection logic.
-                locale, slug, needs_redirect = (Document
-                        .locale_and_slug_from_path(href_path,
-                                                   path_locale=href_locale))
+                locale, slug, needs_redirect = (
+                    locale_and_slug_from_path(href_path,
+                                              path_locale=href_locale))
 
                 # Gather up this link for existence check
                 needs_existence_check[locale.lower()][slug.lower()].add(href)
@@ -449,12 +451,12 @@ class LinkAnnotationFilter(html5lib_Filter):
         # Perform existence checks for all the links, using one DB query per
         # locale for all the candidate slugs.
         for locale, slug_hrefs in needs_existence_check.items():
-            
+
             existing_slugs = (Document.objects
                                       .filter(locale=locale,
                                               slug__in=slug_hrefs.keys())
                                       .values_list('slug', flat=True))
-            
+
             # Remove the slugs that pass existence check.
             for slug in existing_slugs:
                 lslug = slug.lower()
@@ -475,9 +477,10 @@ class LinkAnnotationFilter(html5lib_Filter):
                 if 'href' in attrs:
 
                     href = attrs['href']
-                    if href.startswith(self.base_url):
+                    href_parsed = urlparse(href)
+                    if href_parsed.netloc == self.base_url_parsed.netloc:
                         # Squash site-absolute URLs to site-relative paths.
-                        href = '/%s' % href[len(self.base_url):]
+                        href = href_parsed.path
 
                     if href in links:
                         # Update class names on this link element.
@@ -737,13 +740,15 @@ class SectionTOCFilter(html5lib_Filter):
                         yield t
             elif ('StartTag' == token['type'] and
                   token['name'] in TAGS_IN_TOC and
+                  self.in_header and
                   not self.skip_header):
                 yield token
             elif (token['type'] in ("Characters", "SpaceCharacters")
                   and self.in_header):
                 yield token
             elif ('EndTag' == token['type'] and
-                    token['name'] in TAGS_IN_TOC):
+                  token['name'] in TAGS_IN_TOC and
+                  self.in_header):
                 yield token
             elif ('EndTag' == token['type'] and
                     token['name'] in HEAD_TAGS_TOC):
@@ -861,10 +866,10 @@ class SectionFilter(html5lib_Filter):
 
                 # If this is the first heading of the section and we want to
                 # omit it, note that we've found it
-                if (self.in_section and 
+                if (self.in_section and
                         self.ignore_heading and
                         not self.already_ignored_header and
-                        not self.heading_to_ignore and 
+                        not self.heading_to_ignore and
                         self._isHeading(token)):
 
                     self.heading_to_ignore = token
@@ -958,12 +963,12 @@ class EditorSafetyFilter(html5lib_Filter):
     def __iter__(self):
 
         for token in html5lib_Filter.__iter__(self):
-        
+
             if ('StartTag' == token['type']):
 
                 # Strip out any attributes that start with "on"
-                token['data'] = [(k,v)
-                    for (k,v) in dict(token['data']).items()
+                token['data'] = [(k, v)
+                    for (k, v) in dict(token['data']).items()
                     if not k.startswith('on')]
 
             yield token
